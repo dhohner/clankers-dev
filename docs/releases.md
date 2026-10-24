@@ -18,6 +18,17 @@ The checkout directory can keep its existing name.
    Allow the token owner to publish normal commits to `main`.
    Remove requirements for the distribution repository's old CI checks, because its workflows will be deleted.
    Keep development branch protection and required CI checks in `clankers-dev`.
+5. Add the release key's public certificate, including its signing subkey, to `dhohner` under GitHub **Settings → SSH and GPG keys**.
+   Ensure `43063759+dhohner@users.noreply.github.com` is associated with the account and the key.
+6. Add two more secrets to the `distribution` environment:
+   - `RELEASE_GPG_PRIVATE_KEY`: the armored private signing subkey, copied on macOS with `gpg --armor --export-secret-subkeys '<signing-subkey-fingerprint>!' | pbcopy`.
+     Keep the primary private key off CI and keep private exports out of terminal output, chat, and Git.
+   - `RELEASE_GPG_PASSPHRASE`: the passphrase protecting that signing subkey.
+
+The workflow pins signing subkey `FF0E64E593E001E1EFD4A71ED5ABAA62E29AC2F9` from primary key `4A56B73FA8B37BB3C3D6C933B3C68A5AB1EF0230`.
+This key expires on 2027-10-24.
+When rotating keys, register the replacement public certificate, update both environment secrets, and update `RELEASE_SIGNING_KEY` in `.github/workflows/release.yml`.
+Update `RELEASE_SIGNING_EMAIL` too if the verified signing address changes.
 
 The development repository's default `GITHUB_TOKEN` cannot publish to the separate distribution repository.
 The workflow uses it only to read development files and CI results.
@@ -25,7 +36,8 @@ The distribution token is used to check out and push to `dhohner/clankers`.
 
 ## Preview locally
 
-Use Python 3.14, as required by the operational Python CLI.
+Use Python 3.14, as required by the operational Python CLI, and install GnuPG with both `gpg` and `gpgconf` available on `PATH`.
+The signing tests generate disposable keys in temporary keyrings and create local test commits without accessing your personal keys or publishing.
 These commands write only to temporary directories and run no publishing steps.
 
 ```bash
@@ -55,7 +67,13 @@ It then removes all tracked files in a fresh distribution checkout and copies th
 This removes old tests, evaluation cases, development tooling, and every `.github` file, including the old test workflow and Dependabot configuration.
 The distribution contains no Actions workflows, including the release workflow itself.
 
-Publishing creates a normal commit attributed to the person who triggered the workflow and pushes it to `clankers/main`.
+Publishing uses `git commit -S -s` to create a GPG-signed commit as `dhohner <43063759+dhohner@users.noreply.github.com>` with a matching `Signed-off-by` trailer, then pushes it to `clankers/main`.
+The commit subject is `release: clankers <short source hash>`, using the first seven characters of the source commit SHA.
+The signing step imports the private subkey into a temporary keyring and supplies its passphrase through a private file descriptor.
+It forces the configured signing subkey, verifies the commit signature locally, then stops its GPG agent and deletes the temporary keyring and passphrase file.
+An import or signing failure stops publication.
+The signing secrets are available only to the signing step; the publishing step receives only `DIST_TOKEN`.
+GitHub should display **Verified** when the public key and signing email are registered on the account.
 It creates no tags or GitHub Releases.
 Repeating a release for the same source revision produces no commit if the distribution already matches.
 Concurrent release runs queue, and a competing remote update causes the ordinary push to fail rather than overwrite history.
@@ -80,6 +98,7 @@ Every copied README points contributors to `clankers-dev` for development instru
 
 When adding runtime files outside existing patterns, update the allowlist and add a focused distribution assertion.
 The distribution tests check file boundaries, package paths, marketplace roots, deterministic output, executable modes, isolated Python CLI execution, and removal of files from a checkout containing the previous development tree.
+Signing tests verify a real commit made with an exported signing subkey, the configured author and committer email, temporary keyring cleanup, rejection of invalid or missing secrets, rejection of a wrong passphrase, and handling of an unchanged distribution.
 
 ## History and installation
 

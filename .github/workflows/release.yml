@@ -59,21 +59,19 @@ jobs:
         run: |
           bash source/tools/release/replace.sh \
             "$RUNNER_TEMP/clankers-distribution" "$GITHUB_WORKSPACE/distribution"
-      - name: Commit and publish distribution
+      - name: Sign distribution commit
+        env:
+          RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
+          RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
+          RELEASE_SIGNING_KEY: FF0E64E593E001E1EFD4A71ED5ABAA62E29AC2F9
+          RELEASE_SIGNING_EMAIL: 43063759+dhohner@users.noreply.github.com
+          SOURCE_REVISION: ${{ github.sha }}
+        run: bash source/tools/release/sign.sh "$GITHUB_WORKSPACE/distribution"
+      - name: Publish distribution
         working-directory: distribution
         env:
           DIST_TOKEN: ${{ secrets.DIST_TOKEN }}
-          RELEASE_ACTOR: ${{ github.actor }}
-          RELEASE_ACTOR_ID: ${{ github.actor_id }}
-          SOURCE_REVISION: ${{ github.sha }}
         run: |
-          if git diff --cached --quiet; then
-            echo 'Distribution already matches this source commit.'
-            exit 0
-          fi
-          git config user.name "$RELEASE_ACTOR"
-          git config user.email "$RELEASE_ACTOR_ID+$RELEASE_ACTOR@users.noreply.github.com"
-          git commit -m "chore: release clankers-dev $SOURCE_REVISION"
           # Git's helper shell must expand the token, keeping it out of Git's arguments.
           # shellcheck disable=SC2016
           git -c credential.helper= \
