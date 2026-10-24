@@ -71,12 +71,15 @@ describe("pi extension loader", () => {
     // Supply the complete prompt so Pi does not discover context files from parent directories.
     const systemPrompt = "Host guidance and an earlier extension's instructions.";
 
-    const turn = await runner.emitBeforeAgentStart("Explain this code.", undefined, {
-      cwd,
-      forceSystemPrompt: systemPrompt,
-      contextFiles: [],
-      skills: [],
-    });
+    const turn = await runner.emitBeforeAgentStart(
+      { messageType: "user", prompt: "Explain this code.", images: undefined },
+      {
+        cwd,
+        forceSystemPrompt: systemPrompt,
+        contextFiles: [],
+        skills: [],
+      },
+    );
 
     const asset = await readFile(join(pluginRoot, "styles/explanatory.md"), "utf8");
     const instructions = asset.split("\n---\n")[1].trim();
