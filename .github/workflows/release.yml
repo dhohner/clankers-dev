@@ -1,0 +1,79 @@
+name: Release distribution
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release-clankers
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  publish:
+    if: github.repository == 'dhohner/clankers-dev' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: distribution
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          path: source
+      - name: Require successful source CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          passed=$(gh api --method GET "repos/$SOURCE_REPOSITORY/actions/workflows/ci.yml/runs" \
+            -f head_sha="$SOURCE_REVISION" -f branch=main -f event=push \
+            --jq '.workflow_runs | any(.status == "completed" and .conclusion == "success")')
+          if [ "$passed" != true ]; then
+            echo 'The selected source commit needs a successful CI push run on main.' >&2
+            exit 1
+          fi
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+      - name: Test the distribution builder
+        working-directory: source
+        run: uv run --no-project --isolated --python 3.14 python -m unittest discover -s tools/release/tests -v
+      - name: Build runtime distribution
+        working-directory: source
+        run: |
+          uv run --no-project --isolated --python 3.14 python tools/release/build.py \
+            --output "$RUNNER_TEMP/clankers-distribution"
+      - name: Check out distribution repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: dhohner/clankers
+          ref: main
+          token: ${{ secrets.DIST_TOKEN }}
+          persist-credentials: false
+          path: distribution
+      - name: Replace tracked distribution contents
+        run: |
+          bash source/tools/release/replace.sh \
+            "$RUNNER_TEMP/clankers-distribution" "$GITHUB_WORKSPACE/distribution"
+      - name: Commit and publish distribution
+        working-directory: distribution
+        env:
+          DIST_TOKEN: ${{ secrets.DIST_TOKEN }}
+          RELEASE_ACTOR: ${{ github.actor }}
+          RELEASE_ACTOR_ID: ${{ github.actor_id }}
+          SOURCE_REVISION: ${{ github.sha }}
+        run: |
+          if git diff --cached --quiet; then
+            echo 'Distribution already matches this source commit.'
+            exit 0
+          fi
+          git config user.name "$RELEASE_ACTOR"
+          git config user.email "$RELEASE_ACTOR_ID+$RELEASE_ACTOR@users.noreply.github.com"
+          git commit -m "chore: release clankers-dev $SOURCE_REVISION"
+          # Supply credentials only to Git's credential protocol, without storing the token.
+          git -c credential.helper= \
+            -c 'credential.helper=!f() { echo username=x-access-token; echo password="$DIST_TOKEN"; }; f' \
+            push origin HEAD:main

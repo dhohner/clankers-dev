@@ -184,11 +184,28 @@ jobs:
           # SHA belongs to the action's repository.
           GH_TOKEN: ${{ github.token }}
 
+  distribution-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: "0.13.0"
+      - name: Lint distribution tooling
+        run: |
+          uvx ruff@0.16.9 check tools/release
+          uvx ruff@0.16.9 format --check tools/release
+      - name: Test distribution contents and replacement
+        run: uv run --no-project --isolated --python 3.14 python -m unittest discover -s tools/release/tests -v
+
   # Branch protection requires this job alone. Jobs that the path filter skips count as
   # passing, and a failed or cancelled job fails this one.
   ci-ok:
     if: always()
-    needs: [changes, typescript-lint-and-coverage, typescript-test, python-lint, python-test, workflows-lint]
+    needs: [changes, typescript-lint-and-coverage, typescript-test, python-lint, python-test, workflows-lint, distribution-test]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
