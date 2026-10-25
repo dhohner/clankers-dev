@@ -533,7 +533,7 @@ class PrdBundleCliTests(unittest.TestCase):
     def test_schema_and_examples_are_structured(self) -> None:
         top_level_schema = run_cli("schema")
         top_level_payload = load_yaml(top_level_schema.stdout)
-        authoring_schema = run_cli("schema", "--authoring")
+        authoring_schema = run_cli("schema", "--authoring", "--full")
         authoring_payload = load_yaml(authoring_schema.stdout)
         schema = run_cli("schema", "requirements")
         schema_payload = load_yaml(schema.stdout)

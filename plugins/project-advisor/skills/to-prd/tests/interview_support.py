@@ -215,8 +215,8 @@ class AskProcess:
             text=True,
         )
 
-    def wait_started(self) -> str:
-        deadline = time.monotonic() + STEP_SECONDS
+    def wait_started(self, timeout: float = STEP_SECONDS) -> str:
+        deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
             text = self.stderr_path.read_text(encoding="utf-8")
             if text.endswith("\n"):

@@ -63,7 +63,8 @@ Options:
   Successful templates always emit a YAML manifest.
   On template, `--format yaml` selects the document representation.
   Equal selectors may repeat; conflicting selectors fail.
-- `--full` expands large `validate` and `inspect` output.
+- `--full` returns complete discovery collections and detail on `status`, `schema`, `examples`, `validate`, and `inspect`.
+  Selected schemas and successful template documents are complete by default.
 
 The CLI needs Python 3.14 or newer, without a virtual environment, package installation, or Node.js.
 Only `interview ask` and `interview open` use a browser, and they open the local default browser.
@@ -77,6 +78,16 @@ They describe text response removal, temporary YAML support, the eventual TOON d
 Keep response decoding separate from YAML document parsing.
 
 ### Discovery and recovery
+
+Discovery collections return at most 20 items by default, and example titles return at most 200 Python string characters.
+Each bounded array keeps its existing response key and has `total_count`, `shown_count`, and `truncated` under `collection_metadata.<key>`.
+Example titles have character counts and a complete retrieval `command` under `text_metadata["examples[index].title"]`.
+The text metadata key is a literal field path, such as `examples[0].title`.
+Collection truncation describes omitted items; text truncation has separate metadata.
+Use `next` or the text retrieval command to retrieve omitted content with the same target and explicit response format.
+`schema --full` includes every block contract, and `schema --authoring --full` lists every selectable block.
+`inspect --full` includes every ID, section, asset, HTML ID, fragment link, and the complete normalized manifest.
+Interview answers, notes, comments, nested records, and recording instructions are complete in first delivery and replay.
 
 Run the CLI without arguments to see the workspace dashboard.
 It reports bundle totals, drafts, the latest bundle, live interview states, its executable path, and its command contract.

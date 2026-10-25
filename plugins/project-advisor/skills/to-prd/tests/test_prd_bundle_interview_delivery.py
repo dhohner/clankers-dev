@@ -13,10 +13,11 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from support import BROWSER_LOG_ENV
+from support import BROWSER_LOG_ENV, SKILL_DIR, run_cli_process
 
 from interview_support import (
     STEP_SECONDS,
+    TIME_SCALE,
     TOKEN_HEADER,
     InterviewHarness,
     InterviewTestCase,
@@ -24,6 +25,7 @@ from interview_support import (
     PortSquatter,
     ServerFixture,
 )
+from response_support import decode_response
 from scripts.cli import interview as interview_cli
 from scripts.interview import client
 from scripts.interview.rounds import validate_round
@@ -54,6 +56,139 @@ ROUND_ONE_SUBMIT = {
 
 def delivery_record(session: Path, round_id: str) -> Path:
     return session / "interview" / "delivered" / f"{round_id}.json"
+
+
+class InterviewCompleteContentTests(InterviewTestCase):
+    time_limit_seconds = 5.0
+
+    # Discovery compaction on the common emitter would corrupt answers and nested records.
+    def test_long_answers_notes_comments_instructions_and_records_survive_delivery_and_replay(
+        self,
+    ) -> None:
+        self.assert_complete_content()
+
+    # A fixed step deadline rejects a valid interpreter startup within the test budget.
+    def test_delayed_interpreter_startup_preserves_complete_delivery_and_replay(self) -> None:
+        startup = self.root / "startup"
+        startup.mkdir()
+        marker = startup / "started"
+        (startup / "sitecustomize.py").write_text(
+            "import sys, time\n"
+            "from pathlib import Path\n"
+            "if 'interview' in sys.argv and 'ask' in sys.argv:\n"
+            f"    time.sleep({STEP_SECONDS + 0.2 * TIME_SCALE!r})\n"
+            f"    Path({str(marker)!r}).write_text('started', encoding='utf-8')\n",
+            encoding="utf-8",
+        )
+        self.assert_complete_content(startup)
+        self.assertEqual(marker.read_text(encoding="utf-8"), "started")
+
+    def assert_complete_content(self, startup: Path | None = None) -> None:
+        text = 'Unicode 🙂漢, | : \\"\nSecond line. ' * 20
+        instructions = (
+            "Write each answer record to the design_tree node with the same NODE id. "
+            "For a deferred node, add the open_question text as a new open_questions entry with a "
+            "new id, and list that id in the node relates_to."
+        )
+        for encoding in ("toon", "yaml"):
+            session = self.root / encoding
+            session.mkdir()
+            harness = InterviewHarness(self, self.root, session)
+            if startup is not None:
+                harness.process_env["PYTHONPATH"] = os.pathsep.join((str(startup), str(SKILL_DIR)))
+            labels = [f"Option {number}" for number in range(21)]
+            questions, answers, expected = [], [], []
+            for number in range(21):
+                node = f"NODE-{number:02}"
+                choice = ("option", "written", "decide_later", "out_of_scope")[number % 4]
+                questions.append(
+                    {
+                        "node": node,
+                        "label": f"Question {number}",
+                        "question": f"Question {number}?",
+                        "multi_select": True,
+                        "options": [
+                            {"label": label, "description": text, "recommended": index == 0}
+                            for index, label in enumerate(labels)
+                        ],
+                    }
+                )
+                answer = {"node": node, "choice": choice, "note": text}
+                selected, written, reason = [], "", ""
+                if choice == "option":
+                    selected = labels
+                    record = {
+                        "status": "settled",
+                        "source": "user",
+                        "answer": "; ".join(labels),
+                        "rationale": (
+                            "Write it from the note and the option descriptions: "
+                            + " ".join([text.strip()] * 21)
+                        ),
+                    }
+                    answer["selected"] = selected
+                elif choice == "written":
+                    written = text
+                    record = {
+                        "status": "settled",
+                        "source": "user",
+                        "answer": written,
+                        "rationale": "Write it from the note and the written answer.",
+                    }
+                    answer["written"] = text
+                elif choice == "decide_later":
+                    reason = text
+                    record = {
+                        "status": "deferred",
+                        "open_question": (
+                            f"Question {number}? Blocker: {reason.strip()} Owner: the user."
+                        ),
+                        "relates_to": "the id of the new open_questions entry",
+                    }
+                    answer["reason"] = text
+                else:
+                    reason = text
+                    record = {"status": "pruned", "reason": reason}
+                    answer["reason"] = text
+                answers.append(answer)
+                expected.append(
+                    {
+                        "node": node,
+                        "label": f"Question {number}",
+                        "choice": choice,
+                        "selected": selected,
+                        "written": written,
+                        "reason": reason,
+                        "note": text,
+                        "record": record,
+                    }
+                )
+            source = self.write_round(
+                {"id": "ROUND-01", "questions": questions}, f"{encoding}.json"
+            )
+            ask = harness.start_ask_process(source, "--format", encoding)
+            ask.wait_started(timeout=2.0 * TIME_SCALE)
+            status, body = harness.submit(
+                {"round": "ROUND-01", "answers": answers, "comment": text}
+            )
+            self.assertEqual(status, 200, body)
+            first = ask.finish()
+            self.assertEqual(first.returncode, 0, first.stdout + first.stderr)
+            stored = session / "interview" / "answers" / "ROUND-01.json"
+            before = stored.read_bytes()
+            delivery_record(session, "ROUND-01").unlink()
+            replay = run_cli_process(
+                "interview", "ask", str(session), str(source), "--format", encoding
+            )
+            self.assertEqual(replay.returncode, 0, replay.stdout + replay.stderr)
+            for result in (first, replay):
+                payload = decode_response(result.stdout, encoding)
+                self.assertEqual(payload["instructions"], instructions)
+                self.assertEqual(payload["comment"], text)
+                self.assertEqual(payload["answers"], expected)
+            self.assertEqual(stored.read_bytes(), before)
+            self.assertTrue(delivery_record(session, "ROUND-01").exists())
+            harness.end()
 
 
 class InterviewServerDeliveryTests(InterviewTestCase):

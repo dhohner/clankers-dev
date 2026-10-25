@@ -42,6 +42,13 @@ On template failure, `--format toon` remains an operational selector for compati
 Keep document parsing separate from response decoding.
 Published `prd.yaml` remains the source for downstream skills.
 
+Discovery arrays show at most 20 items, and example titles show at most 200 Python string characters.
+Read `total_count`, `shown_count`, and `truncated` under `collection_metadata.<array-key>`.
+Text metadata uses literal field paths, such as `text_metadata["examples[0].title"]`, with character counts and a retrieval `command`.
+Use `--full` on `status`, `schema`, `examples`, `validate`, and `inspect` for complete requested collections and detail.
+Follow retrieval commands to preserve the target and explicit response format.
+Selected schemas, template documents, interview answers, comments, notes, recording instructions, and nested records are complete by default.
+
 Read [migration instructions](references/cli-migration.md) when updating a consumer.
 Text responses are removed.
 YAML response selection is temporary.
@@ -136,7 +143,9 @@ Grounding is complete when every visited branch is recorded, the frontier is emp
 
 `prd.yaml` is the source of truth, and `index.html` is generated output.
 
-For a new PRD, choose `initiative_type`, take its required review surfaces from `schema --authoring`, and add a block only when it improves a product decision.
+For a new PRD, choose `initiative_type`, and take its required review surfaces from `schema --authoring`.
+Use `schema --authoring --full` when you need every selectable block.
+Add a block only when it improves a product decision.
 Run one `schema` call for the selected blocks, then add their `template --blocks` shapes to the scratch manifest.
 Use `examples/minimal-prd.yaml` as the skeleton, `examples/fixtures/` for one focused surface, and `examples/basic-prd.yaml` only for a broad mixed initiative.
 Read [references/manifest-contract.md](references/manifest-contract.md) when CLI output and validation errors leave a rule unclear.

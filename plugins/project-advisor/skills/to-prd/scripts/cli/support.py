@@ -69,10 +69,12 @@ def next_command(
         values.extend(("--output-root", display_path(output_root)))
     if force and target == "generate":
         values.append("--force")
-    literals = "".join(f" {shlex.quote(str(value))}" for value in values)
     selector = _response_format.get()
-    suffix = f" --format {selector}" if selector and target != "template" else ""
-    return f"{_cli_name()} {command}{literals}{suffix}"
+    if selector and target != "template":
+        option_end = values.index("--") if "--" in values else len(values)
+        values[option_end:option_end] = ["--format", selector]
+    literals = "".join(f" {shlex.quote(str(value))}" for value in values)
+    return f"{_cli_name()} {command}{literals}"
 
 
 def _cli_name() -> str:
@@ -144,32 +146,34 @@ def load_manifest(path: Path, full: bool = False) -> NormalizedManifest:
         return validate_manifest(raw)
     except ManifestError as error:
         items = [_manifest_error_item(message) for message in error.errors]
-        shown, truncated = truncate(items, full)
         payload: dict[str, Any] = {
             "status": "error",
             "code": "manifest_invalid",
             "manifest": display_path(path),
             "total_errors": len(items),
-            "errors": shown,
+            "errors": items,
             "next": [
                 next_command("validate", display_path(path)),
                 next_command("schema requirements"),
                 next_command("examples api-heavy"),
             ],
         }
-        if truncated:
-            payload["truncated"] = True
-            payload["next"][0] = next_command("validate", display_path(path), "--full")
+        bound_collection(
+            payload, "errors", full, next_command("validate", display_path(path), "--full")
+        )
+        payload["truncated"] = payload["collection_metadata"]["errors"]["truncated"]
         raise CliFailure(payload) from error
 
 
-def validation_payload(manifest: NormalizedManifest, manifest_path: Path) -> dict[str, Any]:
+def validation_payload(
+    manifest: NormalizedManifest, manifest_path: Path, full: bool = False
+) -> dict[str, Any]:
     manifest_summary = summary(manifest)
     german_candidates = manifest_summary["untranslated_german_candidates"]
     warnings = []
     if german_candidates:
         warnings.append(f"review {german_candidates} possible untranslated German string(s)")
-    return {
+    payload = {
         "status": "ok",
         "manifest": display_path(manifest_path),
         "manifest_version": manifest["schema_version"],
@@ -184,6 +188,10 @@ def validation_payload(manifest: NormalizedManifest, manifest_path: Path) -> dic
             next_command("schema requirements"),
         ],
     }
+    retrieval = next_command("validate", display_path(manifest_path), "--full")
+    for name in ("review_surfaces", "selected_blocks", "missing_traceability", "warnings"):
+        bound_collection(payload, name, full, retrieval)
+    return payload
 
 
 def summary(manifest: NormalizedManifest) -> dict[str, int]:
@@ -197,6 +205,34 @@ def summary(manifest: NormalizedManifest) -> dict[str, int]:
         "untranslated_german_candidates": _count_german_candidates(manifest),
         "broken_references": 0,
     }
+
+
+def bound_collection(payload: dict[str, Any], name: str, full: bool, retrieval: str) -> None:
+    """Bound one discovery collection; callers must exclude authoritative content."""
+    items = payload[name]
+    shown, truncated = truncate(items, full)
+    payload[name] = shown
+    payload.setdefault("collection_metadata", {})[name] = {
+        "total_count": len(items),
+        "shown_count": len(shown),
+        "truncated": truncated,
+    }
+    if truncated and retrieval not in payload["next"]:
+        payload["next"].insert(0, retrieval)
+
+
+def bound_text(payload: dict[str, Any], path: str, text: str, full: bool, retrieval: str) -> str:
+    shown = text if full else text[:200]
+    truncated = len(shown) < len(text)
+    payload.setdefault("text_metadata", {})[path] = {
+        "total_characters": len(text),
+        "shown_characters": len(shown),
+        "truncated": truncated,
+        "command": retrieval,
+    }
+    if truncated and retrieval not in payload["next"]:
+        payload["next"].insert(0, retrieval)
+    return shown
 
 
 def truncate(items: list[Any], full: bool, limit: int = 20) -> tuple[list[Any], bool]:
@@ -258,6 +294,8 @@ __all__ = [
     "ENTRYPOINT",
     "SKILL_DIR",
     "CliFailure",
+    "bound_collection",
+    "bound_text",
     "display_path",
     "load_manifest",
     "next_command",

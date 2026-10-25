@@ -23,6 +23,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     status = subparsers.add_parser("status", help="show the workspace dashboard")
     status.add_argument("--output-root", type=Path, default=Path("action-items"))
+    status.add_argument("--full", action="store_true", help="show all drafts and live sessions")
 
     validate = subparsers.add_parser("validate", help="validate a PRD YAML manifest")
     validate.add_argument("manifest", type=Path)
@@ -52,6 +53,9 @@ def _build_parser() -> argparse.ArgumentParser:
     schema = subparsers.add_parser("schema", help="show manifest schema summary")
     schema.add_argument("blocks", nargs="*", help="optional block names, such as requirements")
     schema.add_argument(
+        "--full", action="store_true", help="show all blocks and complete contracts"
+    )
+    schema.add_argument(
         "--authoring",
         action="store_true",
         help="show the compact initiative and block selection guide",
@@ -67,6 +71,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     examples = subparsers.add_parser("examples", help="list bundled example manifests")
     examples.add_argument("name", nargs="?", help="optional example name or stem")
+    examples.add_argument(
+        "--full", action="store_true", help="show all examples and complete detail"
+    )
     subparsers.add_parser("interview", help="browser interview commands")
 
     return parser

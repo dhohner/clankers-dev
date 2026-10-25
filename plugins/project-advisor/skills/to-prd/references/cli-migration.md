@@ -48,6 +48,61 @@ It identifies the session, includes repair guidance, and supplies a command to r
 `schema_authoring_with_blocks` remains a usage failure with its existing code.
 An output root that is a file is `io_error`; `bundle_exists` identifies a bundle target conflict.
 
+## Retrieve complete discovery output
+
+`status`, `schema`, `examples`, `validate`, and `inspect` accept `--full`.
+Default discovery collections contain at most 20 items, with at most four fields per discovery row.
+Default example titles contain at most 200 characters as counted by Python `len(str)`.
+Identifier values, paths, command arguments, result states, and recovery commands are complete.
+
+Arrays retain their response keys.
+Read each array's counts under `collection_metadata.<array-key>`:
+
+```yaml
+examples: []
+collection_metadata:
+  examples:
+    total_count: 0
+    shown_count: 0
+    truncated: false
+```
+
+`total_count` counts the source before slicing.
+`shown_count` counts the returned items and matches a TOON array header.
+`truncated` is true exactly when items are omitted.
+Separate collections have separate metadata.
+Text omission has separate metadata under literal field paths, such as `text_metadata["examples[0].title"]`.
+Each text entry includes `total_characters`, `shown_characters`, `truncated`, and a complete retrieval `command`.
+The returned prefix preserves Unicode, whitespace, newlines, and delimiters without adding an ellipsis.
+
+| Command | Bounded collections | Complete retrieval |
+| --- | --- | --- |
+| `status` | `existing_drafts`, `interview_sessions` | `status --full`, with the same `--output-root` |
+| `schema` | discovery `blocks` | `schema --full`, with `--authoring` when originally selected |
+| `examples [name]` | `examples`; optional title text | `examples [name] --full` |
+| `validate <prd.yaml>` | `review_surfaces`, `selected_blocks`, `missing_traceability`, `warnings`, or validation `errors` | `validate <prd.yaml> --full` |
+| `inspect <bundle-dir>` | `sections`, `ids`, `assets`, or validation `errors` | `inspect <bundle-dir> --full` |
+
+Use the complete retrieval commands in `next` when items are omitted.
+They preserve known targets, shell quoting, and any explicit operational format.
+Named example retrieval places `--full` and any explicit format before `--`, followed by the literal name.
+This preserves names such as `-custom`, `--full`, and `--format=bad` as example names.
+Full retrieval changes detail without granting replacement permission or changing interview state.
+Empty collections report zero counts and include useful next commands.
+Legacy `total_errors`, error `truncated`, and `assets_truncated` fields remain available; use the collection metadata for separate counts.
+
+Default schema discovery rows retain `name`, `title`, `kind`, and `fields`.
+`schema --full` returns every block and adds its complete contract and example to each row.
+`schema --authoring --full` returns the complete list of selectable block names.
+Explicitly selected schemas always include their complete field shapes, optional fields, constraints, prefixes, and examples, regardless of selection size.
+Successful templates include every selected block.
+`inspect --full` returns complete source collections, HTML IDs, fragment links, and the complete normalized manifest.
+
+Interview delivery and replay preserve all answers, selected values, notes, comments, recording instructions, and nested records.
+Diagnostic messages and repair instructions also remain complete.
+Compaction runs only where discovery payloads are constructed.
+It does not apply recursively in the serializer.
+
 ## Keep document parsing separate
 
 Successful `template --blocks ...` always prints a complete YAML manifest without an operational envelope.

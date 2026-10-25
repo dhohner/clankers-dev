@@ -17,6 +17,10 @@ from .yaml_manifest import YamlError, loads
 class BundleValidationError(RuntimeError):
     """Raised when a generated bundle is incomplete or internally inconsistent."""
 
+    def __init__(self, errors: str | list[str]) -> None:
+        self.errors = [errors] if isinstance(errors, str) else errors
+        super().__init__("; ".join(self.errors))
+
 
 @dataclass(frozen=True)
 class _BundleAnalysis:
@@ -140,7 +144,7 @@ def _analyze_generated_bundle(bundle: Path) -> _BundleAnalysis:
                     errors.append(f"index.html references a missing asset: {local_path}")
 
     if errors:
-        raise BundleValidationError("; ".join(errors))
+        raise BundleValidationError(errors)
     assert normalized_manifest is not None
     return _BundleAnalysis(normalized_manifest, parser.ids, parser.raw_fragment_links)
 

@@ -16,12 +16,12 @@ from ..spec import entity_blocks, iter_tree_nodes, tree_blocks
 from .support import (
     DESCRIPTION,
     CliFailure,
+    bound_collection,
     display_executable,
     display_path,
     load_manifest,
     next_command,
     summary,
-    truncate,
 )
 
 
@@ -52,7 +52,7 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
     next_steps.extend(
         next_command("interview status", display_path(files.session)) for files in sessions
     )
-    return {
+    payload = {
         "status": "ok",
         "workspace": display_path(Path.cwd()),
         "generator": display_executable(),
@@ -71,6 +71,10 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
         ],
         "next": next_steps,
     }
+    retrieval = next_command("status", "--full", output_root=root)
+    for name in ("existing_drafts", "interview_sessions"):
+        bound_collection(payload, name, getattr(args, "full", False), retrieval)
+    return payload
 
 
 def command_generate(args: argparse.Namespace) -> dict[str, Any]:
@@ -203,18 +207,15 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
     try:
         analysis = _analyze_generated_bundle(bundle)
     except BundleValidationError as error:
-        messages = [part.strip() for part in str(error).split(";") if part.strip()]
-        items, truncated = truncate(
-            [
-                {
-                    "path": "bundle",
-                    "message": message,
-                    "fix": "Repair the source manifest and regenerate the bundle.",
-                }
-                for message in messages
-            ],
-            args.full,
-        )
+        messages = error.errors
+        items = [
+            {
+                "path": "bundle",
+                "message": message,
+                "fix": "Repair the source manifest and regenerate the bundle.",
+            }
+            for message in messages
+        ]
         payload: dict[str, Any] = {
             "status": "error",
             "code": "bundle_invalid",
@@ -232,12 +233,10 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
                 else next_command("generate <prd.yaml>", output_root=bundle.parent),
             ],
         }
-        if truncated:
-            payload["truncated"] = True
-            payload["next"].insert(
-                0,
-                next_command("inspect", display_path(bundle), "--full"),
-            )
+        bound_collection(
+            payload, "errors", args.full, next_command("inspect", display_path(bundle), "--full")
+        )
+        payload["truncated"] = payload["collection_metadata"]["errors"]["truncated"]
         raise CliFailure(payload) from error
     except (OSError, UnicodeError) as error:
         raise CliFailure(
@@ -273,7 +272,7 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
         },
         "sections": list(manifest["blocks"]),
         "ids": _entity_ids(manifest),
-        "assets": assets if args.full else assets[:20],
+        "assets": assets,
         "anchors": {
             "count": len(analysis.ids),
             "broken": sorted(set(analysis.fragment_links) - set(analysis.ids)),
@@ -285,12 +284,13 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
             next_command("validate", display_path(bundle / "prd.yaml")),
         ],
     }
-    if not args.full and len(assets) > 20:
+    retrieval = next_command("inspect", display_path(bundle), "--full")
+    for name in ("sections", "ids", "assets"):
+        bound_collection(payload, name, args.full, retrieval)
+    if payload["collection_metadata"]["assets"]["truncated"]:
         payload["assets_truncated"] = True
-        payload["next"].insert(
-            0,
-            next_command("inspect", display_path(bundle), "--full"),
-        )
+    if not args.full and retrieval not in payload["next"]:
+        payload["next"].insert(0, retrieval)
     if args.full:
         payload["html_ids"] = analysis.ids
         payload["fragment_links"] = analysis.fragment_links
