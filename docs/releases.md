@@ -58,6 +58,9 @@ The release workflow checks out the selected commit, so published content comes 
 2. Wait for the **CI** workflow's push run for that exact commit to pass.
    Its required `ci-ok` job includes the distribution tests.
 3. In `clankers-dev`, open **Actions → Release distribution → Run workflow**, selecting `main`.
+   If the distribution has no committed `SOURCE_REVISION` yet, set `initial_base` to the full source commit SHA immediately before the changes you want included in the first release.
+   That commit is excluded from the changelog.
+   Later releases read their starting revision from the distribution's committed `SOURCE_REVISION` and ignore this input.
 4. Approve the `distribution` environment deployment if approval is configured.
 5. Check the resulting commit on `dhohner/clankers` and its `SOURCE_REVISION` file.
 
@@ -69,6 +72,14 @@ The distribution contains no Actions workflows, including the release workflow i
 
 Publishing uses `git commit -S -s` to create a GPG-signed commit as `dhohner <43063759+dhohner@users.noreply.github.com>` with a matching `Signed-off-by` trailer, then pushes it to `clankers/main`.
 The commit subject is `release: clankers <short source hash>`, using the first seven characters of the source commit SHA.
+The body lists every source commit since the previous release as a bullet, with descriptions indented beneath their subjects in source history order.
+A final `Source: <previous short hash>..<current short hash>` line records the release range.
+Both hashes use seven characters.
+Source `Signed-off-by` lines are removed; dependency updates with `build(deps):` or `build(deps-dev):` subjects retain only their subjects.
+The release commit receives its own signing trailer.
+The workflow fetches the full source history and reads the previous revision from the distribution's committed `SOURCE_REVISION` before replacing files.
+Missing or invalid source revisions and histories that have diverged stop publication.
+Publishing an ancestor of the previous revision records a rollback with both revisions and the removed changes.
 The signing step imports the private subkey into a temporary keyring and supplies its passphrase through a private file descriptor.
 It forces the configured signing subkey, verifies the commit signature locally, then stops its GPG agent and deletes the temporary keyring and passphrase file.
 An import or signing failure stops publication.
@@ -98,7 +109,8 @@ README files are copied without changing their contents.
 
 When adding runtime files outside existing patterns, update the allowlist and add a focused distribution assertion.
 The distribution tests check file boundaries, package paths, marketplace roots, deterministic output, executable modes, isolated Python CLI execution, and removal of files from a checkout containing the previous development tree.
-Signing tests verify a real commit made with an exported signing subkey, the configured author and committer email, temporary keyring cleanup, rejection of invalid or missing secrets, rejection of a wrong passphrase, and handling of an unchanged distribution.
+Message tests use local Git repositories to verify release boundaries, description preservation, metadata removal, the first release, invalid revisions, and rollbacks.
+Signing tests verify the generated body in a real commit made with an exported signing subkey, the configured author and committer email, temporary keyring cleanup, rejection of invalid or missing secrets, rejection of a wrong passphrase, and handling of an unchanged distribution.
 
 ## History and installation
 

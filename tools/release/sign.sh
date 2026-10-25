@@ -11,8 +11,7 @@ fi
 : "${RELEASE_GPG_PASSPHRASE:?Set the signing subkey passphrase}"
 : "${RELEASE_SIGNING_KEY:?Set the signing subkey fingerprint}"
 : "${RELEASE_SIGNING_EMAIL:?Set the verified signing email}"
-: "${SOURCE_REVISION:?Set the source commit SHA}"
-SHORT_GIT_HASH=${SOURCE_REVISION:0:7}
+message=${2:?Pass the generated release message file}
 
 export GNUPGHOME
 GNUPGHOME=$(mktemp -d)
@@ -46,6 +45,6 @@ git -C "$checkout" \
   -c user.signingkey="$RELEASE_SIGNING_KEY!" \
   -c gpg.format=openpgp \
   -c gpg.program="$GNUPGHOME/sign" \
-  commit -S -s -m "release: clankers $SHORT_GIT_HASH"
+  commit -S -s --cleanup=verbatim -F "$message"
 
 git -C "$checkout" -c gpg.format=openpgp -c gpg.program=gpg verify-commit HEAD

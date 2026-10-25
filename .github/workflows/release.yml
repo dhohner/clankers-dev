@@ -2,6 +2,11 @@ name: Release distribution
 
 on:
   workflow_dispatch:
+    inputs:
+      initial_base:
+        description: "Full source commit SHA before the first release's changes (only needed without SOURCE_REVISION)"
+        required: false
+        type: string
 
 concurrency:
   group: release-clankers
@@ -22,6 +27,7 @@ jobs:
         with:
           persist-credentials: false
           path: source
+          fetch-depth: 0
       - name: Require successful source CI
         env:
           GH_TOKEN: ${{ github.token }}
@@ -55,6 +61,16 @@ jobs:
           token: ${{ secrets.DIST_TOKEN }}
           persist-credentials: false
           path: distribution
+      - name: Generate release commit message
+        env:
+          SOURCE_REVISION: ${{ github.sha }}
+          INITIAL_BASE: ${{ inputs.initial_base }}
+        run: |
+          uv run --no-project --isolated --python 3.14 python source/tools/release/message.py \
+            --source "$GITHUB_WORKSPACE/source" \
+            --distribution "$GITHUB_WORKSPACE/distribution" \
+            --revision "$SOURCE_REVISION" \
+            --initial-base "$INITIAL_BASE" > "$RUNNER_TEMP/clankers-release-message"
       - name: Replace tracked distribution contents
         run: |
           bash source/tools/release/replace.sh \
@@ -65,8 +81,9 @@ jobs:
           RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
           RELEASE_SIGNING_KEY: FF0E64E593E001E1EFD4A71ED5ABAA62E29AC2F9
           RELEASE_SIGNING_EMAIL: 43063759+dhohner@users.noreply.github.com
-          SOURCE_REVISION: ${{ github.sha }}
-        run: bash source/tools/release/sign.sh "$GITHUB_WORKSPACE/distribution"
+        run: |
+          bash source/tools/release/sign.sh \
+            "$GITHUB_WORKSPACE/distribution" "$RUNNER_TEMP/clankers-release-message"
       - name: Publish distribution
         working-directory: distribution
         env:

@@ -94,9 +94,14 @@ class SigningTests(unittest.TestCase):
             "RELEASE_GPG_PASSPHRASE": self.passphrase,
             "RELEASE_SIGNING_KEY": self.subkey,
             "RELEASE_SIGNING_EMAIL": EMAIL,
-            "SOURCE_REVISION": "1" * 40,
         }
         self.git("init", "--quiet", str(self.checkout))
+        self.message = self.directory / "message.txt"
+        self.message.write_text(
+            "release: clankers 1111111\n\nChanges since previous release:\n\n"
+            "feat: useful feature\n\nExplain the user benefit.\n",
+            encoding="utf-8",
+        )
 
     def git(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -116,7 +121,7 @@ class SigningTests(unittest.TestCase):
 
     def sign(self) -> subprocess.CompletedProcess[str]:
         result = subprocess.run(
-            ["bash", str(SIGNER), str(self.checkout)],
+            ["bash", str(SIGNER), str(self.checkout), str(self.message)],
             env=self.env,
             text=True,
             capture_output=True,
@@ -171,8 +176,24 @@ class SigningTests(unittest.TestCase):
         self.assertEqual(identities, [f"dhohner <{EMAIL}>"] * 2)
         message = self.git("-C", str(self.checkout), "log", "-1", "--format=%B").stdout
         self.assertEqual(message.splitlines()[0], "release: clankers 1111111")
+        self.assertIn(self.message.read_text().strip(), message)
         self.assertEqual(
             message.strip().splitlines()[-1], f"Signed-off-by: dhohner <{EMAIL}>"
+        )
+
+    def test_repeated_release_creates_no_commit_and_needs_no_secrets(self) -> None:
+        self.stage()
+        first = self.sign()
+        self.assertEqual(first.returncode, 0, first.stderr)
+        previous = self.git("-C", str(self.checkout), "rev-parse", "HEAD").stdout
+        self.stage()
+        del self.env["RELEASE_GPG_PRIVATE_KEY"]
+        del self.env["RELEASE_GPG_PASSPHRASE"]
+        result = self.sign()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("already matches", result.stdout)
+        self.assertEqual(
+            self.git("-C", str(self.checkout), "rev-parse", "HEAD").stdout, previous
         )
 
     def test_wrong_passphrase_fails_without_creating_a_commit(self) -> None:
