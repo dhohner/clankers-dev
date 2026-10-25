@@ -22,11 +22,6 @@ DEVELOPMENT_PARTS = {
     "coverage",
 }
 DEVELOPMENT_SUFFIXES = (".pyc", ".whl", ".test.ts", ".test.js", ".spec.ts", ".spec.js")
-DEVELOPMENT_NOTICE = (
-    "> This repository contains generated distribution files.\n"
-    "> For development instructions, tests, and contributions, use "
-    "[clankers-dev](https://github.com/dhohner/clankers-dev).\n\n"
-)
 
 
 def git(source: Path, *args: str) -> str:
@@ -139,10 +134,6 @@ def build(
         target = output / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source / relative, target)
-    for path in output.rglob("README.md"):
-        path.write_text(
-            DEVELOPMENT_NOTICE + path.read_text(encoding="utf-8"), encoding="utf-8"
-        )
     (output / "SOURCE_REVISION").write_text(revision + "\n", encoding="utf-8")
     prepare_packages(output)
     validate_distribution(output)

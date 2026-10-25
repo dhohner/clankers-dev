@@ -192,6 +192,15 @@ class RepositoryDistributionTests(unittest.TestCase):
             (self.output / relative).stat().st_mode, (ROOT / relative).stat().st_mode
         )
 
+    def test_preserves_readme_contents(self) -> None:
+        readmes = sorted(self.output.rglob("README.md"))
+        self.assertIn(self.output / "README.md", readmes)
+        self.assertTrue(any(path.parent != self.output for path in readmes))
+        for path in readmes:
+            relative = path.relative_to(self.output)
+            with self.subTest(path=relative):
+                self.assertEqual(path.read_bytes(), (ROOT / relative).read_bytes())
+
     def test_distribution_cli_runs_without_production_packages(self) -> None:
         skill = self.output / "plugins/project-advisor/skills/to-prd"
         for args in (("schema",), ("validate", "examples/basic-prd.yaml", "--full")):

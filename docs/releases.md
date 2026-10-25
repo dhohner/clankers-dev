@@ -94,7 +94,7 @@ Generated package manifests omit scripts and development dependencies.
 Their npm `files` lists are rebuilt from the actual distribution contents, including the security guard's `src/` files.
 The development lockfile is excluded because it describes the development dependency graph.
 Runtime dependency ranges and optional host peer declarations are preserved.
-Every copied README points contributors to `clankers-dev` for development instructions.
+README files are copied without changing their contents.
 
 When adding runtime files outside existing patterns, update the allowlist and add a focused distribution assertion.
 The distribution tests check file boundaries, package paths, marketplace roots, deterministic output, executable modes, isolated Python CLI execution, and removal of files from a checkout containing the previous development tree.
