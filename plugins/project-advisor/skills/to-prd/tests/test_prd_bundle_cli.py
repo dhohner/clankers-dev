@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import shlex
+import shutil
+import subprocess
+import sys
 import tempfile
 import unittest
+import venv
 from pathlib import Path
 
 from support import (
+    ENTRYPOINT,
     EXAMPLE,
+    NO_BROWSER_ENV,
+    SKILL_DIR,
     SOURCE_ASSETS,
     AnchorParser,
     dump_yaml,
@@ -16,8 +24,279 @@ from support import (
     run_generator,
 )
 
+from toon_reader import top_level_array
+
 
 class PrdBundleCliTests(unittest.TestCase):
+    def test_validate_suggestions_keep_source_paths_as_literal_arguments(self) -> None:
+        # Removing literal argument quoting would split or interpret these paths.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            for name in ("source space", "source'quote", "source$dollar;semi", "source`x`[a]&"):
+                with self.subTest(name=name):
+                    source = Path(temporary_directory) / f"{name}.yaml"
+                    source.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+                    result = run_cli("validate", str(source))
+                    command = shlex.split(load_yaml(result.stdout)["next"][0])
+                    self.assertEqual(command[2:], ["generate", str(source)])
+
+    def test_bundle_suggestions_quote_targets_and_do_not_authorize_replacement(self) -> None:
+        # Adding force on refusal or invalid inspection authorizes data loss.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory) / "output ' $; [x]"
+            generated = run_cli("generate", str(EXAMPLE), "--output-root", str(output))
+            bundle = output.resolve() / "PRD-example-review-bundle"
+            payload = load_yaml(generated.stdout)
+            self.assertEqual(shlex.split(payload["next"][0]), ["open", str(bundle / "index.html")])
+            self.assertEqual(shlex.split(payload["next"][1])[2:], ["inspect", str(bundle)])
+            refused = load_yaml(
+                run_cli("generate", str(EXAMPLE), "--output-root", str(output)).stdout
+            )
+            self.assertEqual(shlex.split(refused["next"][0])[2:], ["inspect", str(bundle)])
+            self.assertTrue(all("--force" not in shlex.split(step) for step in refused["next"]))
+            (bundle / "index.html").write_text("broken", encoding="utf-8")
+            invalid = load_yaml(run_cli("inspect", str(bundle)).stdout)
+            self.assertTrue(all("--force" not in shlex.split(step) for step in invalid["next"]))
+            self.assertIn(
+                ["generate", str(bundle / "prd.yaml"), "--output-root", str(output.resolve())],
+                [shlex.split(step)[2:] for step in invalid["next"]],
+            )
+            self.assertIn(
+                ["validate", str(bundle / "prd.yaml")],
+                [shlex.split(step)[2:] for step in invalid["next"]],
+            )
+
+    def test_suggestions_preserve_explicit_operational_formats_only(self) -> None:
+        # Dropping the selector switches an agent's response decoder on the next command.
+        cases = [
+            (),
+            ("schema",),
+            ("schema", "--authoring"),
+            ("schema", "requirements"),
+            ("schema", "unknown"),
+            ("examples",),
+            ("examples", "unknown"),
+            ("validate", str(EXAMPLE)),
+            ("validate", "/missing/source.yaml"),
+            ("inspect", "/missing/bundle"),
+            ("generate",),
+            ("interview", "status", "/missing/session"),
+        ]
+        for encoding in ("yaml", "toon"):
+            for args in cases:
+                with self.subTest(format=encoding, args=args):
+                    result = run_cli(*args, "--format", encoding)
+                    steps = (
+                        load_yaml(result.stdout)["next"]
+                        if encoding == "yaml"
+                        else top_level_array(result.stdout, "next")
+                    )
+                    for step in steps:
+                        tokens = shlex.split(step)
+                        if tokens[0] == "open":
+                            continue
+                        if "template" in tokens:
+                            self.assertNotIn("--format", tokens)
+                        else:
+                            self.assertEqual(tokens[-2:], ["--format", encoding])
+        for step in load_yaml(run_cli("schema").stdout)["next"]:
+            self.assertNotIn("--format", shlex.split(step))
+        # Template's selector describes the YAML document, so it cannot become a response selector.
+        result = run_cli("template", "--blocks", "unknown", "--format", "yaml")
+        for step in load_yaml(result.stdout)["next"]:
+            self.assertNotIn("--format", shlex.split(step))
+        # A TOON template selector controls failure responses, as the migration contract specifies.
+        result = run_cli("template", "--blocks", "unknown", "--format", "toon")
+        for step in top_level_array(result.stdout, "next"):
+            tokens = shlex.split(step)
+            if "template" not in tokens:
+                self.assertEqual(tokens[-2:], ["--format", "toon"])
+        # Context must end with the invocation, including errors.
+        for step in load_yaml(run_cli("schema").stdout)["next"]:
+            self.assertNotIn("--format", shlex.split(step))
+
+    def test_dashboard_and_inspection_transitions_keep_known_literal_targets(self) -> None:
+        # Interpolating these targets breaks commands; guessing absent sources invents context.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            output = root / "output ' $; &"
+            empty = load_yaml(run_cli("status", "--output-root", str(output)).stdout)
+            self.assertEqual(
+                shlex.split(empty["next"][1])[2:],
+                ["generate", "<prd.yaml>", "--output-root", str(output)],
+            )
+            self.assertEqual(
+                run_cli("generate", str(EXAMPLE), "--output-root", str(output)).returncode, 0
+            )
+            bundle = output / "PRD-example-review-bundle"
+            status = load_yaml(run_cli("status", "--output-root", str(output)).stdout)
+            self.assertEqual(shlex.split(status["next"][0]), ["open", str(bundle / "index.html")])
+            self.assertEqual(shlex.split(status["next"][1])[2:], ["inspect", str(bundle)])
+            for index in range(25):
+                (bundle / "assets" / f"extra-{index}.txt").write_text("fixture", encoding="utf-8")
+            inspected = load_yaml(run_cli("inspect", str(bundle)).stdout)
+            self.assertEqual(
+                shlex.split(inspected["next"][0])[2:], ["inspect", str(bundle), "--full"]
+            )
+            self.assertEqual(
+                shlex.split(inspected["next"][-1])[2:], ["validate", str(bundle / "prd.yaml")]
+            )
+            (bundle / "prd.yaml").unlink()
+            invalid = load_yaml(run_cli("inspect", str(bundle)).stdout)
+            self.assertIn("<prd.yaml>", invalid["next"][0])
+            self.assertNotIn(str(bundle / "prd.yaml"), invalid["next"][0])
+
+    def test_interview_recovery_quotes_known_session_and_round_paths(self) -> None:
+        # Replacing a known round path with a placeholder loses the intended retry.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            session = Path(temporary_directory).resolve() / "session ' $; &"
+            session.mkdir()
+            round_file = session / "round ' $; &.yaml"
+            for content in (None, "questions: []\n", "id: [broken"):
+                with self.subTest(content=content):
+                    if content is not None:
+                        round_file.write_text(content, encoding="utf-8")
+                    result = run_cli(
+                        "interview", "ask", str(session), str(round_file), "--format", "yaml"
+                    )
+                    self.assertEqual(result.returncode, 1)
+                    retry = shlex.split(load_yaml(result.stdout)["next"][0])
+                    self.assertEqual(
+                        retry[2:],
+                        ["interview", "ask", str(session), str(round_file), "--format", "yaml"],
+                    )
+            missing_session = session / "missing ' $; &"
+            missing = run_cli(
+                "interview", "ask", str(missing_session), str(round_file), "--format", "yaml"
+            )
+            self.assertEqual(
+                shlex.split(load_yaml(missing.stdout)["next"][0])[2:],
+                ["interview", "ask", str(missing_session), str(round_file), "--format", "yaml"],
+            )
+            status = load_yaml(
+                run_cli("interview", "status", str(session), "--format", "yaml").stdout
+            )
+            self.assertEqual(
+                shlex.split(status["next"][0])[2:],
+                ["interview", "ask", str(session), "<round-file>", "--format", "yaml"],
+            )
+            for command in ("open", "end"):
+                result = run_cli("interview", command, str(session), "--format", "yaml")
+                self.assertEqual(
+                    shlex.split(load_yaml(result.stdout)["next"][0])[2:],
+                    ["interview", "ask", str(session), "<round-file>", "--format", "yaml"],
+                )
+            invalid = run_cli(
+                "interview", "ask", str(round_file), str(round_file), "--format", "yaml"
+            )
+            self.assertEqual(
+                shlex.split(load_yaml(invalid.stdout)["next"][0])[2:],
+                ["interview", "ask", "<session-dir>", str(round_file), "--format", "yaml"],
+            )
+
+    def test_generation_io_recovery_retries_same_root_and_replacement_request(self) -> None:
+        # Retrying in the default root changes the publication target.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            source = root / "source ' $;.yaml"
+            source.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+            for failure in ("root_file", "root_parent_file"):
+                for force in (False, True):
+                    with self.subTest(failure=failure, force=force):
+                        obstacle = root / f"{failure}-{force}"
+                        obstacle.write_text("obstacle", encoding="utf-8")
+                        output = obstacle if failure == "root_file" else obstacle / "output ' $;"
+                        result = run_cli(
+                            "generate",
+                            str(source),
+                            "--output-root",
+                            str(output),
+                            *(["--force"] if force else []),
+                        )
+                        self.assertEqual(result.returncode, 1)
+                        payload = load_yaml(result.stdout)
+                        self.assertEqual(payload["code"], "io_error")
+                        commands = [shlex.split(step)[2:] for step in payload["next"]]
+                        expected = ["generate", str(source), "--output-root", str(output)] + (
+                            ["--force"] if force else []
+                        )
+                        self.assertIn(expected, commands)
+                        obstacle.unlink()
+                        retry = run_cli(*expected)
+                        self.assertEqual(retry.returncode, 0, retry.stdout)
+
+    def test_manifest_failures_suggest_retrying_known_source_without_losing_quotes(self) -> None:
+        # Losing a source on validation failure sends repair to an unrelated example.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            source = Path(temporary_directory).resolve() / "source ' $;.yaml"
+            manifest = load_example_manifest()
+            for item in manifest["blocks"]["requirements"]:
+                item["validation"] = ["TEST-missing"] * 25
+            invalid = dump_yaml(manifest)
+            cases = {
+                "missing": None,
+                "syntax": "title: [broken",
+                "contract": "slug: invalid\n",
+                "truncated": invalid,
+                "unreadable": "directory",
+            }
+            for name, content in cases.items():
+                with self.subTest(name=name):
+                    if source.exists():
+                        source.unlink()
+                    if content == "directory":
+                        source.mkdir()
+                    elif content is not None:
+                        source.write_text(content, encoding="utf-8")
+                    result = run_cli("validate", str(source), "--format", "yaml")
+                    self.assertEqual(result.returncode, 1)
+                    payload = load_yaml(result.stdout)
+                    commands = [shlex.split(step)[2:] for step in payload["next"]]
+                    expected = (
+                        ["validate", str(source)]
+                        + (["--full"] if payload.get("truncated") else [])
+                        + ["--format", "yaml"]
+                    )
+                    self.assertIn(expected, commands)
+                    if source.is_dir():
+                        source.rmdir()
+
+    def test_inspection_failures_keep_bundle_and_workspace_context(self) -> None:
+        # Losing the bundle parent makes recovery discover or publish into another workspace.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            output = Path(temporary_directory).resolve() / "output ' $; &"
+            bundle = output / "PRD-example-review-bundle"
+            missing = load_yaml(run_cli("inspect", str(bundle), "--format", "yaml").stdout)
+            self.assertIn(
+                ["status", "--output-root", str(output), "--format", "yaml"],
+                [shlex.split(step)[2:] for step in missing["next"]],
+            )
+            self.assertIn(
+                ["generate", "<prd.yaml>", "--output-root", str(output), "--format", "yaml"],
+                [shlex.split(step)[2:] for step in missing["next"]],
+            )
+            bundle.mkdir(parents=True)
+            (bundle / "prd.yaml").write_bytes(b"\xff")
+            unreadable = load_yaml(run_cli("inspect", str(bundle), "--format", "yaml").stdout)
+            self.assertEqual(unreadable["code"], "bundle_unreadable")
+            self.assertIn(
+                ["inspect", str(bundle), "--format", "yaml"],
+                [shlex.split(step)[2:] for step in unreadable["next"]],
+            )
+            generated = run_cli("generate", str(EXAMPLE), "--output-root", str(output), "--force")
+            self.assertEqual(generated.returncode, 0, generated.stdout)
+            index = bundle / "index.html"
+            index.write_text(
+                index.read_text(encoding="utf-8")
+                + "".join(f'<img src="./missing-{number}.png">' for number in range(25)),
+                encoding="utf-8",
+            )
+            invalid = load_yaml(run_cli("inspect", str(bundle), "--format", "yaml").stdout)
+            self.assertEqual(invalid["code"], "bundle_invalid")
+            self.assertEqual(
+                shlex.split(invalid["next"][0])[2:],
+                ["inspect", str(bundle), "--full", "--format", "yaml"],
+            )
+
     def test_valid_manifest_generates_complete_bundle_with_copied_assets(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -645,6 +924,437 @@ class PrdBundleCliTests(unittest.TestCase):
 
 class PrdBundleEntrypointTests(unittest.TestCase):
     """Checks of `python -m scripts`, which the other tests replace with in-process calls."""
+
+    def test_suggestions_keep_dash_paths_usable_as_paths(self) -> None:
+        # Dropping ./ turns known positional and option values into parser flags.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            source = root / "-source.yaml"
+            source.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+            environment = {**NO_BROWSER_ENV, "PATH": str(Path(sys.executable).parent)}
+            result = subprocess.run(
+                [sys.executable, str(ENTRYPOINT), "validate", "./-source.yaml", "--format", "yaml"],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            suggestion = shlex.split(load_yaml(result.stdout)["next"][0])
+            generated = subprocess.run(
+                suggestion,
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(generated.returncode, 0, generated.stdout + generated.stderr)
+            self.assertEqual(suggestion[2:], ["generate", "./-source.yaml", "--format", "yaml"])
+
+            dashboard = subprocess.run(
+                [sys.executable, str(ENTRYPOINT), "status", "--output-root", "./-output"],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            retry = shlex.split(load_yaml(dashboard.stdout)["next"][1])
+            self.assertEqual(retry[2:], ["generate", "<prd.yaml>", "--output-root", "./-output"])
+            retry[3] = "./-source.yaml"
+            generated = subprocess.run(
+                retry,
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(generated.returncode, 0, generated.stdout + generated.stderr)
+            inspection = shlex.split(load_yaml(generated.stdout)["next"][1])
+            self.assertEqual(inspection[2:], ["inspect", "./-output/PRD-example-review-bundle"])
+            inspected = subprocess.run(
+                inspection,
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
+
+            (root / "-session").mkdir()
+            (root / "-round.yaml").write_text("questions: []\n", encoding="utf-8")
+            invalid_round = subprocess.run(
+                [
+                    sys.executable,
+                    str(ENTRYPOINT),
+                    "interview",
+                    "ask",
+                    "./-session",
+                    "./-round.yaml",
+                    "--format",
+                    "yaml",
+                ],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(invalid_round.returncode, 1, invalid_round.stderr)
+            retry = shlex.split(load_yaml(invalid_round.stdout)["next"][0])
+            self.assertEqual(
+                retry[2:], ["interview", "ask", "./-session", "./-round.yaml", "--format", "yaml"]
+            )
+            replay = subprocess.run(
+                retry,
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(replay.returncode, 1, replay.stderr)
+            self.assertEqual(load_yaml(replay.stdout)["code"], "round_invalid")
+
+            installation = root / "-installation"
+            shutil.copytree(
+                SKILL_DIR / "scripts",
+                installation / "scripts",
+                ignore=shutil.ignore_patterns("__pycache__"),
+            )
+            installed = subprocess.run(
+                [
+                    sys.executable,
+                    "./-installation/scripts/__main__.py",
+                    "validate",
+                    "./-source.yaml",
+                ],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)
+            retry = shlex.split(load_yaml(installed.stdout)["next"][0])
+            self.assertEqual(retry[1:3], ["./-installation/scripts/__main__.py", "generate"])
+            retry[2] = "validate"
+            validated = subprocess.run(
+                retry,
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(validated.returncode, 0, validated.stdout + validated.stderr)
+
+    def test_suggestions_reuse_selected_interpreter_when_path_python_differs(self) -> None:
+        # Resolving python3 through PATH can replace a working interpreter with an incompatible one.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            selected_environment = root / "selected python ' $;"
+            venv.EnvBuilder(with_pip=False, symlinks=True).create(selected_environment)
+            interpreter = selected_environment / "bin" / "python"
+            other_python = root / "python3"
+            other_python.write_text(
+                "#!/bin/sh\nprintf 'unexpected interpreter\\n'\nexit 97\n", encoding="utf-8"
+            )
+            other_python.chmod(0o755)
+            environment = {**NO_BROWSER_ENV, "PATH": str(root)}
+            original = subprocess.run(
+                [str(interpreter), str(ENTRYPOINT), "validate", str(EXAMPLE), "--format", "yaml"],
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(original.returncode, 0, original.stdout + original.stderr)
+            suggestion = load_yaml(original.stdout)["next"][1]
+            followed = subprocess.run(
+                suggestion,
+                shell=True,
+                cwd=root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(followed.returncode, 0, followed.stdout + followed.stderr)
+            self.assertEqual(
+                shlex.split(suggestion),
+                [str(interpreter), str(ENTRYPOINT), "schema", "requirements", "--format", "yaml"],
+            )
+            self.assertEqual(load_yaml(followed.stdout)["block"], "requirements")
+
+    def test_generation_recovery_keeps_custom_target_format_and_explicit_force(self) -> None:
+        # Dropping output-root changes the publication target; invented force replaces data.
+        repository = SKILL_DIR.parents[3]
+        for cwd in (repository, SKILL_DIR):
+            for encoding, force in (("yaml", False), ("toon", True)):
+                with (
+                    self.subTest(cwd=cwd, encoding=encoding, force=force),
+                    tempfile.TemporaryDirectory() as temporary_directory,
+                ):
+                    root = Path(temporary_directory).resolve()
+                    source = root / "source ' $; &.yaml"
+                    output = root / "output ' $; &"
+                    source.write_text("slug: [broken", encoding="utf-8")
+                    original = [
+                        sys.executable,
+                        str(ENTRYPOINT),
+                        "generate",
+                        str(source),
+                        "--output-root",
+                        str(output),
+                        "--format",
+                        encoding,
+                    ]
+                    if force:
+                        original.append("--force")
+                    failed = subprocess.run(
+                        original,
+                        cwd=cwd,
+                        env=NO_BROWSER_ENV,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(failed.returncode, 1, failed.stderr)
+                    steps = (
+                        load_yaml(failed.stdout)["next"]
+                        if encoding == "yaml"
+                        else top_level_array(failed.stdout, "next")
+                    )
+                    commands = [shlex.split(step) for step in steps]
+                    retries = [command for command in commands if "generate" in command]
+                    self.assertEqual(len(retries), 1, steps)
+                    retry = retries[0]
+                    self.assertEqual(retry[2:5], ["generate", str(source), "--output-root"])
+                    self.assertEqual(retry[5], str(output))
+                    self.assertEqual("--force" in retry, force)
+                    self.assertEqual(retry[-2:], ["--format", encoding])
+                    self.assertFalse(any("<" in token for token in retry))
+                    source.write_text(EXAMPLE.read_text(encoding="utf-8"), encoding="utf-8")
+                    repaired = subprocess.run(
+                        retry,
+                        cwd=cwd,
+                        env=NO_BROWSER_ENV,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(repaired.returncode, 0, repaired.stdout + repaired.stderr)
+                    next_steps = (
+                        load_yaml(repaired.stdout)["next"]
+                        if encoding == "yaml"
+                        else top_level_array(repaired.stdout, "next")
+                    )
+                    inspect = shlex.split(next_steps[1])
+                    self.assertEqual(
+                        inspect[2:],
+                        [
+                            "inspect",
+                            str(output / "PRD-example-review-bundle"),
+                            "--format",
+                            encoding,
+                        ],
+                    )
+                    inspected = subprocess.run(
+                        inspect,
+                        cwd=cwd,
+                        env=NO_BROWSER_ENV,
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    self.assertEqual(inspected.returncode, 0, inspected.stdout + inspected.stderr)
+                    self.assertEqual(
+                        load_yaml(
+                            (output / "PRD-example-review-bundle" / "prd.yaml").read_text(
+                                encoding="utf-8"
+                            )
+                        )["slug"],
+                        "example-review-bundle",
+                    )
+
+    def test_dashboard_describes_contract_and_displays_executable_at_home_boundary(self) -> None:
+        # A string prefix test incorrectly abbreviates sibling directories as home.
+        for home, expected in (
+            (SKILL_DIR.parent, "~/to-prd/scripts/__main__.py"),
+            (SKILL_DIR.parent / "to-pr", str(ENTRYPOINT)),
+            (SKILL_DIR / "outside", str(ENTRYPOINT)),
+        ):
+            with self.subTest(home=home), tempfile.TemporaryDirectory() as temporary_directory:
+                result = subprocess.run(
+                    [sys.executable, str(ENTRYPOINT)],
+                    cwd=temporary_directory,
+                    env={**NO_BROWSER_ENV, "HOME": str(home)},
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                payload = load_yaml(result.stdout)
+                self.assertEqual(payload["generator"], expected)
+                self.assertEqual(
+                    payload["description"],
+                    "Validate, generate, inspect, and template YAML PRD review bundles.",
+                )
+                self.assertEqual(payload["bundle_count"], "0")
+                self.assertEqual(payload["interview_sessions"], [])
+                self.assertEqual(payload["response_formats"], ["toon", "yaml"])
+                self.assertEqual(
+                    payload["response_defaults"], {"interview": "toon", "other": "yaml"}
+                )
+                self.assertEqual(payload["template_format"], "yaml document")
+                self.assertEqual(
+                    payload["exit_codes"],
+                    {"success": "0", "operation_failure": "1", "usage_error": "2"},
+                )
+                self.assertTrue(all("<prd.yaml>" in step for step in payload["next"]))
+
+    def test_every_help_surface_reports_formats_exits_and_relevant_next_actions(self) -> None:
+        # Missing command guidance leaves agents unable to recover using executable options.
+        cases = {
+            (): "status",
+            ("status",): "inspect <bundle-dir>",
+            ("validate",): "generate <prd.yaml>",
+            ("generate",): "inspect <bundle-dir>",
+            ("inspect",): "validate <prd.yaml>",
+            ("schema",): "template --blocks",
+            ("examples",): "validate <prd.yaml>",
+            ("template",): "validate <prd.yaml>",
+            ("interview",): "interview ask <session-dir> <round-file>",
+            ("interview", "ask"): "interview end <session-dir>",
+            ("interview", "open"): "interview status <session-dir>",
+            ("interview", "status"): "interview open <session-dir>",
+            ("interview", "end"): "interview ask <new-session-dir> <round-file>",
+        }
+        for command, next_action in cases.items():
+            with self.subTest(command=command):
+                result = run_cli_process(*command, "--help")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                help_text = " ".join(result.stdout.split())
+                for expected in (
+                    "--format",
+                    "toon",
+                    "yaml",
+                    "0 success",
+                    "1 operation failure",
+                    "2 usage error",
+                    "Next:",
+                    next_action,
+                ):
+                    self.assertIn(expected, help_text)
+                self.assertIn("interview default", help_text)
+                self.assertIn("YAML by default", help_text)
+                if not command:
+                    self.assertIn("browser interview commands", help_text)
+                if command == ("template",):
+                    self.assertIn("--format yaml selects the document representation", help_text)
+                if command == ("generate",):
+                    self.assertIn("--output-root", help_text)
+                    self.assertIn("--force", help_text)
+                if command == ("inspect",):
+                    self.assertNotIn("--output-root", help_text)
+
+    def test_installed_paths_and_generator_failure_recovery_keep_literal_context(self) -> None:
+        # An installation path is also a shell argument, including when examples supply paths.
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory).resolve()
+            installation = root / "~installation ' $; &"
+            for directory in ("scripts", "bundle", "examples"):
+                shutil.copytree(
+                    SKILL_DIR / directory,
+                    installation / directory,
+                    ignore=shutil.ignore_patterns("__pycache__"),
+                )
+            entrypoint = installation / "scripts" / "__main__.py"
+            result = subprocess.run(
+                [sys.executable, str(entrypoint), "examples", "minimal-prd", "--format", "yaml"],
+                cwd=root,
+                env=NO_BROWSER_ENV,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stdout)
+            payload = load_yaml(result.stdout)
+            source = installation / "examples" / "minimal-prd.yaml"
+            expected_source = str(source.relative_to(root))
+            validation = shlex.split(payload["next"][0])
+            self.assertEqual(
+                validation,
+                [
+                    sys.executable,
+                    str(entrypoint.relative_to(root)),
+                    "validate",
+                    expected_source,
+                    "--format",
+                    "yaml",
+                ],
+            )
+            validated = subprocess.run(
+                validation,
+                cwd=root,
+                env=NO_BROWSER_ENV,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(validated.returncode, 0, validated.stdout)
+            template = installation / "bundle" / "index.template.html"
+            original = template.read_text(encoding="utf-8")
+            template.write_text(original + '<img src="./missing.png">', encoding="utf-8")
+            output = root / "output ' $; &"
+            failed = subprocess.run(
+                [
+                    sys.executable,
+                    str(entrypoint),
+                    "generate",
+                    str(source),
+                    "--output-root",
+                    str(output),
+                    "--force",
+                    "--format",
+                    "yaml",
+                ],
+                cwd=root,
+                env=NO_BROWSER_ENV,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(failed.returncode, 1, failed.stdout)
+            failure = load_yaml(failed.stdout)
+            self.assertEqual(failure["code"], "generator_failed")
+            commands = [shlex.split(step) for step in failure["next"]]
+            self.assertIn(
+                [
+                    sys.executable,
+                    str(entrypoint.relative_to(root)),
+                    "generate",
+                    expected_source,
+                    "--output-root",
+                    str(output.relative_to(root)),
+                    "--force",
+                    "--format",
+                    "yaml",
+                ],
+                commands,
+            )
+            template.write_text(original, encoding="utf-8")
+            retry = next(command for command in commands if command[2] == "generate")
+            repaired = subprocess.run(
+                retry, cwd=root, env=NO_BROWSER_ENV, capture_output=True, text=True, check=False
+            )
+            self.assertEqual(repaired.returncode, 0, repaired.stdout)
 
     def test_entry_point_validates_generates_and_inspects_bundle(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:

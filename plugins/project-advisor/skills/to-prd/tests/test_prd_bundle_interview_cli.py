@@ -495,13 +495,15 @@ class InterviewCliProcessTests(InterviewCliTestCase):
                             stream.close()
                 self.assertEqual(exit_code, expected_exit[command])
 
-    def test_session_error_next_command_runs_once_session_is_filled_in(self) -> None:
+    def test_invalid_session_next_command_runs_once_placeholder_is_filled_in(self) -> None:
         round_file = self.write_round(VALID_ROUND_YAML, "round with space.yaml")
         session = self.ended_session()
+        invalid_session = self.root / "session-file"
+        invalid_session.write_text("not a directory", encoding="utf-8")
         for command in COMMANDS:
             with self.subTest(command):
                 extra = (str(round_file),) if command == "ask" else ()
-                failed = self.interview(command, self.root / "missing", *extra)
+                failed = self.interview(command, invalid_session, *extra)
                 retry = top_level_array(failed.stdout, "next")[0]
                 argv = shlex.split(retry.replace("<session-dir>", shlex.quote(str(session))))
 

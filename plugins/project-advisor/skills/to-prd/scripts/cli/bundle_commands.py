@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shlex
 from pathlib import Path
 from typing import Any
 
@@ -13,8 +14,9 @@ from ..manifest_types import NormalizedManifest
 from ..output_validation import BundleValidationError, _analyze_generated_bundle
 from ..spec import entity_blocks, iter_tree_nodes, tree_blocks
 from .support import (
-    ENTRYPOINT,
+    DESCRIPTION,
     CliFailure,
+    display_executable,
     display_path,
     load_manifest,
     next_command,
@@ -37,30 +39,46 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
     drafts = [bundle / "prd.yaml" for bundle in bundles if (bundle / "prd.yaml").is_file()]
     next_steps = (
         [
-            f"open {display_path(latest / 'index.html')}",
-            next_command(f"inspect {display_path(latest)}"),
+            f"open {shlex.quote(display_path(latest / 'index.html'))}",
+            next_command("inspect", display_path(latest)),
         ]
         if latest
-        else [next_command("validate <prd.yaml>"), next_command("generate <prd.yaml>")]
+        else [
+            next_command("validate <prd.yaml>"),
+            next_command("generate <prd.yaml>", output_root=root),
+        ]
+    )
+    sessions = live_sessions(Path.cwd())
+    next_steps.extend(
+        next_command("interview status", display_path(files.session)) for files in sessions
     )
     return {
         "status": "ok",
         "workspace": display_path(Path.cwd()),
-        "generator": display_path(ENTRYPOINT),
+        "generator": display_executable(),
+        "description": DESCRIPTION,
+        "response_formats": ["toon", "yaml"],
+        "response_defaults": {"interview": "toon", "other": "yaml"},
+        "template_format": "yaml document",
+        "exit_codes": {"success": 0, "operation_failure": 1, "usage_error": 2},
         "output_root": display_path(root),
         "bundle_count": len(bundles),
         "latest_bundle": None if latest is None else display_path(latest),
         "existing_drafts": [display_path(path) for path in drafts],
         "interview_sessions": [
             {"session": display_path(files.session), "state": summarize(files).state}
-            for files in live_sessions(Path.cwd())
+            for files in sessions
         ],
         "next": next_steps,
     }
 
 
 def command_generate(args: argparse.Namespace) -> dict[str, Any]:
-    manifest = load_manifest(args.manifest)
+    try:
+        manifest = load_manifest(args.manifest)
+    except CliFailure as error:
+        error.payload["next"].append(_generate_retry(args))
+        raise
     target = args.output_root.resolve() / f"PRD-{manifest['slug']}"
     if (target.exists() or target.is_symlink()) and not args.force:
         display_target = display_path(target)
@@ -77,18 +95,19 @@ def command_generate(args: argparse.Namespace) -> dict[str, Any]:
                     }
                 ],
                 "next": [
-                    next_command(f"inspect {display_target}"),
-                    next_command(f"generate {display_path(args.manifest)} --force"),
+                    next_command("inspect", display_target),
+                    next_command("validate", display_path(args.manifest)),
                 ],
             }
         )
     try:
         bundle = generate_bundle(manifest, args.output_root, args.force)
     except FileExistsError as error:
+        target_exists = target.exists() or target.is_symlink()
         raise CliFailure(
             {
                 "status": "error",
-                "code": "bundle_exists" if target.exists() or target.is_symlink() else "io_error",
+                "code": "bundle_exists" if target_exists else "io_error",
                 "bundle": display_path(target),
                 "errors": [
                     {
@@ -100,7 +119,11 @@ def command_generate(args: argparse.Namespace) -> dict[str, Any]:
                         ),
                     }
                 ],
-                "next": [next_command(f"inspect {display_path(target)}")],
+                "next": [
+                    next_command("inspect", display_path(target))
+                    if target_exists
+                    else _generate_retry(args)
+                ],
             }
         ) from error
     except RuntimeError as error:
@@ -117,7 +140,10 @@ def command_generate(args: argparse.Namespace) -> dict[str, Any]:
                         ),
                     }
                 ],
-                "next": [next_command(f"validate {display_path(args.manifest)}")],
+                "next": [
+                    next_command("validate", display_path(args.manifest)),
+                    _generate_retry(args),
+                ],
             },
         ) from error
     except OSError as error:
@@ -132,7 +158,7 @@ def command_generate(args: argparse.Namespace) -> dict[str, Any]:
                         "fix": "Use a writable output directory with free space, then retry.",
                     }
                 ],
-                "next": [next_command(f"generate {display_path(args.manifest)}")],
+                "next": [_generate_retry(args)],
             }
         ) from error
 
@@ -147,8 +173,8 @@ def command_generate(args: argparse.Namespace) -> dict[str, Any]:
         "validation": {"manifest": "ok", "bundle": "ok"},
         "summary": summary(manifest),
         "next": [
-            f"open {display_path(bundle / 'index.html')}",
-            next_command(f"inspect {display_path(bundle)}"),
+            f"open {shlex.quote(display_path(bundle / 'index.html'))}",
+            next_command("inspect", display_path(bundle)),
         ],
     }
 
@@ -168,7 +194,10 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
                         "fix": "Generate the bundle before inspecting it.",
                     }
                 ],
-                "next": [next_command("status"), next_command("generate <prd.yaml>")],
+                "next": [
+                    next_command("status", output_root=bundle.parent),
+                    next_command("generate <prd.yaml>", output_root=bundle.parent),
+                ],
             }
         )
     try:
@@ -192,13 +221,22 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
             "bundle": display_path(bundle),
             "total_errors": len(messages),
             "errors": items,
-            "next": [next_command(f"generate {display_path(bundle / 'prd.yaml')} --force")],
+            "next": [
+                next_command("validate", display_path(bundle / "prd.yaml"))
+                if (bundle / "prd.yaml").is_file()
+                else next_command("validate <prd.yaml>"),
+                next_command(
+                    "generate", display_path(bundle / "prd.yaml"), output_root=bundle.parent
+                )
+                if (bundle / "prd.yaml").is_file()
+                else next_command("generate <prd.yaml>", output_root=bundle.parent),
+            ],
         }
         if truncated:
             payload["truncated"] = True
             payload["next"].insert(
                 0,
-                next_command(f"inspect {display_path(bundle)} --full"),
+                next_command("inspect", display_path(bundle), "--full"),
             )
         raise CliFailure(payload) from error
     except (OSError, UnicodeError) as error:
@@ -214,7 +252,10 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
                         "fix": "Restore readable UTF-8 files or regenerate the bundle.",
                     }
                 ],
-                "next": [next_command("status")],
+                "next": [
+                    next_command("inspect", display_path(bundle)),
+                    next_command("status", output_root=bundle.parent),
+                ],
             }
         ) from error
 
@@ -240,21 +281,30 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
         "traceability": _traceability_summary(manifest),
         "validation": {"manifest": "ok", "bundle": "ok"},
         "next": [
-            f"open {display_path(bundle / 'index.html')}",
-            next_command(f"validate {display_path(bundle / 'prd.yaml')}"),
+            f"open {shlex.quote(display_path(bundle / 'index.html'))}",
+            next_command("validate", display_path(bundle / "prd.yaml")),
         ],
     }
     if not args.full and len(assets) > 20:
         payload["assets_truncated"] = True
         payload["next"].insert(
             0,
-            next_command(f"inspect {display_path(bundle)} --full"),
+            next_command("inspect", display_path(bundle), "--full"),
         )
     if args.full:
         payload["html_ids"] = analysis.ids
         payload["fragment_links"] = analysis.fragment_links
         payload["normalized_manifest"] = manifest
     return payload
+
+
+def _generate_retry(args: argparse.Namespace) -> str:
+    return next_command(
+        "generate",
+        display_path(args.manifest),
+        output_root=args.output_root,
+        force=args.force,
+    )
 
 
 def _safe_mtime(path: Path) -> float:

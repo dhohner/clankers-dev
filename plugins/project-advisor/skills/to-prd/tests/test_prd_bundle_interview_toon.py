@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -398,11 +399,19 @@ class IndependentInterviewTests(InterviewTestCase):
         self.assertEqual(status, 200, original)
         before = {path: path.read_bytes() for path in server.stored_answers()}
         round_file = self.write_round(round_)
+        isolated_python = [sys.executable, "-I", "-S"]
+        # Framework builds can report a different executable path under -I -S.
+        interpreter = subprocess.run(
+            [*isolated_python, "-c", "import sys; print(sys.executable)"],
+            cwd=support.SKILL_DIR,
+            env=support.NO_BROWSER_ENV,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout.strip()
         result = subprocess.run(
             [
-                sys.executable,
-                "-I",
-                "-S",
+                *isolated_python,
                 str(support.ENTRYPOINT),
                 "interview",
                 "ask",
@@ -465,8 +474,11 @@ class IndependentInterviewTests(InterviewTestCase):
                 )
             ],
             "next": [
-                f"python3 scripts/__main__.py interview ask {self.session} <next-round-file>",
-                f"python3 scripts/__main__.py interview end {self.session}",
+                (
+                    f"{shlex.quote(interpreter)} scripts/__main__.py "
+                    f"interview ask {self.session} <next-round-file>"
+                ),
+                f"{shlex.quote(interpreter)} scripts/__main__.py interview end {self.session}",
             ],
         }
         assert_json_equal(self, payload, expected)

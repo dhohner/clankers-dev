@@ -33,8 +33,8 @@ def command_examples(args: argparse.Namespace) -> dict[str, Any]:
     examples = [_example_item(path) for path in paths]
     next_steps = (
         [
-            next_command(f"validate {examples[0]['path']}"),
-            next_command(f"generate {examples[0]['path']}"),
+            next_command("validate", examples[0]["path"]),
+            next_command("generate", examples[0]["path"]),
         ]
         if examples
         else []

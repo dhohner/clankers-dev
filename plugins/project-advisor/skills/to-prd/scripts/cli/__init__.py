@@ -10,13 +10,13 @@ from typing import Any
 from . import interview
 from .commands import COMMANDS
 from .response import FormatError, ResponseParser, UsageError, emit, usage_payload
-from .support import CliFailure
+from .support import DESCRIPTION, CliFailure, command_context
 
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = ResponseParser(
         prog="to-prd",
-        description="Validate, generate, inspect, and template YAML PRD review bundles.",
+        description=DESCRIPTION,
         epilog="Run browser interview rounds with `interview`; see interview --help.",
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -67,6 +67,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     examples = subparsers.add_parser("examples", help="list bundled example manifests")
     examples.add_argument("name", nargs="?", help="optional example name or stem")
+    subparsers.add_parser("interview", help="browser interview commands")
 
     return parser
 
@@ -76,6 +77,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     if not raw:
         raw = ["status"]
     args = _build_parser().parse_args(raw)
+    if args.command == "interview":
+        raise UsageError("use the interview parser for interview commands")
     args.format = output_format[1] if output_format else "yaml"
     return args
 
@@ -124,21 +127,25 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     is_interview = remaining[:1] == ["interview"]
     output_format = selector[1] if selector else ("toon" if is_interview else "yaml")
-    try:
-        if is_interview:
-            payload = interview.run(remaining[1:])
-        else:
-            args = parse_args(raw)
-            payload = _run(args)
-            if args.command == "template":
-                output_format = "yaml"
-        exit_code = 0
-    except UsageError as error:
-        payload = usage_payload(str(error), remaining)
-        exit_code = 2
-    except (CliFailure, interview.InterviewFailure) as error:
-        payload = error.payload
-        exit_code = error.exit_code if isinstance(error, CliFailure) else 1
+    explicit_format = selector[1] if selector else None
+    if remaining[:1] == ["template"] and explicit_format == "yaml":
+        explicit_format = None
+    with command_context(explicit_format):
+        try:
+            if is_interview:
+                payload = interview.run(remaining[1:])
+            else:
+                args = parse_args(raw)
+                payload = _run(args)
+                if args.command == "template":
+                    output_format = "yaml"
+            exit_code = 0
+        except UsageError as error:
+            payload = usage_payload(str(error), remaining)
+            exit_code = 2
+        except (CliFailure, interview.InterviewFailure) as error:
+            payload = error.payload
+            exit_code = error.exit_code if isinstance(error, CliFailure) else 1
     emit(payload, output_format)
     return exit_code
 

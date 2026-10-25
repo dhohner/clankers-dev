@@ -61,6 +61,7 @@ Options:
 - `--format toon|yaml` selects operational response encoding before or after the command, including `--format=value`.
   Interview commands default to TOON; other commands default to YAML.
   Successful templates always emit a YAML manifest.
+  On template, `--format yaml` selects the document representation.
   Equal selectors may repeat; conflicting selectors fail.
 - `--full` expands large `validate` and `inspect` output.
 
@@ -74,6 +75,26 @@ A valid selector also encodes usage errors; unusable or conflicting selectors pr
 Read the [migration instructions](references/cli-migration.md) before updating a consumer.
 They describe text response removal, temporary YAML support, the eventual TOON default, its evidence gate, and exit code changes.
 Keep response decoding separate from YAML document parsing.
+
+### Discovery and recovery
+
+Run the CLI without arguments to see the workspace dashboard.
+It reports bundle totals, drafts, the latest bundle, live interview states, its executable path, and its command contract.
+The executable display uses `~` only within the home directory.
+The commands in `next` use executable paths and quote literal arguments for the shell.
+`<command> --help` and `interview <subcommand> --help` describe options, formats, exit codes, and relevant next actions.
+
+Use known paths from `next` and replace visible placeholders before running commands.
+Do not execute a suggestion that still contains placeholders.
+Preserve quoting when paths contain spaces, apostrophes, dollar signs, or shell syntax.
+An explicit operational format follows compatible suggestions.
+A template document selector does not become an operational response selector, and operational selectors do not transfer to templates.
+Template `--format toon` selects failure responses and can follow compatible recovery commands.
+Only `status` and `generate` accept `--output-root`.
+Inspection targets the actual bundle directory.
+After repairing a generation fault, its generation retry retains the output root and any explicit original `--force` request.
+A refusal or failed inspection does not authorize replacement.
+The caller must explicitly request replacement before using `--force`.
 
 ## Interview
 

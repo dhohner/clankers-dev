@@ -296,7 +296,7 @@ def resolve_session(path: Path, retry_arguments: str) -> Path:
             "session_dir",
             f"{path} does not exist",
             "Create the session directory outside action-items/, then run the command again.",
-            retry,
+            [_interview_command(retry_arguments.replace("<session-dir>", _quoted(path), 1))],
             session=str(path),
         ) from error
     except OSError as error:
@@ -331,8 +331,10 @@ def resolve_session(path: Path, retry_arguments: str) -> Path:
 
 def load_round(path: Path, session: Path) -> Round:
     """Parse and validate one round file, or fail with every fault found."""
-    retry = [_interview_command(f"ask {_quoted(session)} {_quoted(path)}")]
-    help_command = _interview_command("ask --help")
+    retry = [
+        _interview_command(f"ask {_quoted(session)} {_quoted(path)}"),
+        _interview_command("ask --help"),
+    ]
     fields = {"session": display_path(session), "round_file": display_path(path)}
     try:
         raw = loads(path.read_text(encoding="utf-8"))
@@ -342,7 +344,7 @@ def load_round(path: Path, session: Path) -> Round:
             "round_file",
             f"{path} does not exist",
             "Write the round file, then pass its path.",
-            [_interview_command(f"ask {_quoted(session)} <round-file>"), help_command],
+            retry,
             **fields,
         ) from error
     except YamlError as error:
@@ -351,7 +353,7 @@ def load_round(path: Path, session: Path) -> Round:
             "round",
             f"line {error.line}, {error}",
             "Repair the YAML or JSON syntax of the round file.",
-            [*retry, help_command],
+            retry,
             **fields,
         ) from error
     except (OSError, UnicodeDecodeError) as error:
@@ -360,7 +362,7 @@ def load_round(path: Path, session: Path) -> Round:
             "round_file",
             f"cannot read {path}: {error}",
             "Pass a readable UTF-8 round file.",
-            [*retry, help_command],
+            retry,
             **fields,
         ) from error
     try:
@@ -370,7 +372,7 @@ def load_round(path: Path, session: Path) -> Round:
             _error_payload(
                 "round_invalid",
                 error.faults,
-                [*retry, help_command],
+                retry,
                 **fields,
                 total_errors=len(error.faults),
             )

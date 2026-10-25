@@ -35,8 +35,10 @@ Failures include a stable `code`, `errors` with repair instructions, and `next` 
 Valid selectors also encode usage errors.
 Unusable or conflicting selectors produce TOON errors.
 
-Successful `template --blocks ...` always emits a complete YAML manifest, including with `--format yaml`.
+Successful `template --blocks ...` always emits a complete YAML manifest.
+`--format yaml` selects the template document representation.
 Template failures use the selected response format or the YAML default.
+On template failure, `--format toon` remains an operational selector for compatible recovery commands.
 Keep document parsing separate from response decoding.
 Published `prd.yaml` remains the source for downstream skills.
 
@@ -44,6 +46,29 @@ Read [migration instructions](references/cli-migration.md) when updating a consu
 Text responses are removed.
 YAML response selection is temporary.
 TOON promotion requires passing tests, lower aggregate tokens, and controlled agent trials without observed regression.
+
+## Discover the workspace and recover
+
+Run the CLI without arguments, or run `status`, to discover the current workspace.
+The dashboard describes the CLI, formats, exit codes, bundle total, latest bundle, drafts, and live interview states.
+Its executable display uses `~` for a path inside the home directory.
+Only sessions started in the current workspace appear.
+Run `<command> --help` or `interview <subcommand> --help` for options and relevant next actions.
+
+Follow `next` commands after checking their paths and result state.
+Known paths are literal shell arguments.
+Replace visible placeholders such as `<prd.yaml>` and `<next-round-file>` before running a suggestion.
+Do not execute a suggestion that still contains placeholders.
+Preserve shell quoting when copying a command.
+The abbreviated executable display is for reading; use the executable command in `next`.
+
+Suggestions preserve explicit operational formats when the target uses the same selector meaning.
+Template document selectors and operational response selectors do not transfer between those command types.
+Pass `--output-root` only to `status` and `generate`.
+Pass the actual bundle directory to `inspect`.
+After repairing a generation fault, use its generation retry to retain the output root and any explicit replacement request.
+A refusal or failed inspection requires repair and an explicit caller decision before replacement.
+Use `--force` only when the caller requests replacement.
 
 ## Ground the decision
 
@@ -166,7 +191,7 @@ An acceptance recorded only in chat blocks the handoff, because `to-issues` and 
 On acceptance:
 
 1. Set `status: Accepted` in the working manifest and change nothing else.
-2. Rerun `validate`, `generate --force`, and `inspect` with the same `--output-root`, so the published bundle carries the accepted source.
+2. Rerun `validate`, then `generate --force` with the same `--output-root`, and inspect the actual published bundle directory.
 3. Report the published `action-items/PRD-<slug>/prd.yaml` path.
 
 Then offer `to-issues` for Jira-ready tickets, `to-agent-tasks` for coding-agent work packages, or no handoff, and invoke the chosen skill with the published `prd.yaml`.

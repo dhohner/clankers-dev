@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 import shlex
 import sys
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +18,8 @@ from ..yaml_manifest import YamlError, loads
 
 SKILL_DIR = Path(__file__).resolve().parents[2]
 ENTRYPOINT = SKILL_DIR / "scripts" / "__main__.py"
+DESCRIPTION = "Validate, generate, inspect, and template YAML PRD review bundles."
+_response_format: ContextVar[str | None] = ContextVar("response_format", default=None)
 GERMAN_CANDIDATE = re.compile(
     r"[äöüÄÖÜß]|\b(und|oder|nicht|für|mit|ohne|wenn|dann|ist|sind)\b",
     re.IGNORECASE,
@@ -27,21 +32,53 @@ class CliFailure(Exception):
         self.exit_code = exit_code
 
 
-def display_path(path: Path) -> str:
+def display_executable() -> str:
+    path = Path(sys.argv[0]).resolve()
     try:
-        return str(path.resolve().relative_to(Path.cwd().resolve()))
-    except OSError, ValueError:
+        return str(Path("~") / path.relative_to(Path.home()))
+    except ValueError:
         return str(path)
 
 
-def next_command(command: str) -> str:
-    return f"{_cli_name()} {command}"
+def display_path(path: Path) -> str:
+    try:
+        displayed = str(path.resolve().relative_to(Path.cwd().resolve()))
+    except OSError, ValueError:
+        displayed = str(path)
+    return f"./{displayed}" if displayed.startswith("-") else displayed
+
+
+@contextmanager
+def command_context(response_format: str | None) -> Iterator[None]:
+    token = _response_format.set(response_format)
+    try:
+        yield
+    finally:
+        _response_format.reset(token)
+
+
+def next_command(
+    command: str,
+    *arguments: str | Path,
+    output_root: Path | None = None,
+    force: bool = False,
+) -> str:
+    target = command.split()[0]
+    values = list(arguments)
+    if output_root is not None and target in {"status", "generate"}:
+        values.extend(("--output-root", display_path(output_root)))
+    if force and target == "generate":
+        values.append("--force")
+    literals = "".join(f" {shlex.quote(str(value))}" for value in values)
+    selector = _response_format.get()
+    suffix = f" --format {selector}" if selector and target != "template" else ""
+    return f"{_cli_name()} {command}{literals}{suffix}"
 
 
 def _cli_name() -> str:
     entrypoint = Path(sys.argv[0])
     if entrypoint.suffix == ".py":
-        return f"python3 {shlex.quote(display_path(entrypoint))}"
+        return f"{shlex.quote(sys.executable)} {shlex.quote(display_path(entrypoint))}"
     return shlex.quote(display_path(entrypoint))
 
 
@@ -62,7 +99,7 @@ def load_manifest(path: Path, full: bool = False) -> NormalizedManifest:
                     }
                 ],
                 "next": [
-                    next_command(f"validate {display_path(path)}"),
+                    next_command("validate", display_path(path)),
                     next_command("examples"),
                 ],
             }
@@ -80,7 +117,10 @@ def load_manifest(path: Path, full: bool = False) -> NormalizedManifest:
                         "fix": "Pass an existing YAML manifest path.",
                     }
                 ],
-                "next": [next_command("examples")],
+                "next": [
+                    next_command("validate", display_path(path)),
+                    next_command("examples"),
+                ],
             }
         ) from error
     except (OSError, UnicodeError) as error:
@@ -96,7 +136,7 @@ def load_manifest(path: Path, full: bool = False) -> NormalizedManifest:
                         "fix": "Pass a readable UTF-8 YAML or JSON manifest file.",
                     }
                 ],
-                "next": [next_command(f"validate {display_path(path)}")],
+                "next": [next_command("validate", display_path(path))],
             }
         ) from error
 
@@ -112,16 +152,14 @@ def load_manifest(path: Path, full: bool = False) -> NormalizedManifest:
             "total_errors": len(items),
             "errors": shown,
             "next": [
+                next_command("validate", display_path(path)),
                 next_command("schema requirements"),
                 next_command("examples api-heavy"),
             ],
         }
         if truncated:
             payload["truncated"] = True
-            payload["next"].insert(
-                0,
-                next_command(f"validate {display_path(path)} --full"),
-            )
+            payload["next"][0] = next_command("validate", display_path(path), "--full")
         raise CliFailure(payload) from error
 
 
@@ -142,7 +180,7 @@ def validation_payload(manifest: NormalizedManifest, manifest_path: Path) -> dic
         "summary": manifest_summary,
         "warnings": warnings,
         "next": [
-            next_command(f"generate {display_path(manifest_path)}"),
+            next_command("generate", display_path(manifest_path)),
             next_command("schema requirements"),
         ],
     }

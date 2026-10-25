@@ -161,6 +161,7 @@ class InterviewResponseTests(InterviewTestCase):
                         retry = ["interview", command, str(session)]
                         if command == "ask":
                             retry.append(str(source))
+                        retry.extend(("--format", output_format))
                         self.assertEqual(shlex.split(payload["next"][0])[-len(retry) :], retry)
                         self.assertTrue(payload["errors"])
                         for error in payload["errors"]:
