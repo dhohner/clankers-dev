@@ -23,6 +23,28 @@ Run every CLI command from the repository root:
 python3 plugins/project-advisor/skills/to-prd/scripts/__main__.py <command> [options]
 ```
 
+## Read CLI responses
+
+Operational commands accept `--format toon` or `--format yaml` before or after the command, including `--format=value`.
+Interview commands default to TOON.
+Other commands default to YAML during migration.
+Decode one response from stdout and read progress from stderr.
+No command reads terminal answers.
+Exit codes are `0` for success, `1` for operation failure, and `2` for usage errors.
+Failures include a stable `code`, `errors` with repair instructions, and `next` commands.
+Valid selectors also encode usage errors.
+Unusable or conflicting selectors produce TOON errors.
+
+Successful `template --blocks ...` always emits a complete YAML manifest, including with `--format yaml`.
+Template failures use the selected response format or the YAML default.
+Keep document parsing separate from response decoding.
+Published `prd.yaml` remains the source for downstream skills.
+
+Read [migration instructions](references/cli-migration.md) when updating a consumer.
+Text responses are removed.
+YAML response selection is temporary.
+TOON promotion requires passing tests, lower aggregate tokens, and controlled agent trials without observed regression.
+
 ## Ground the decision
 
 For a revision, read the supplied `prd.yaml`, the published `action-items/PRD-*` bundle, the feedback, and answered open questions before proposing changes.

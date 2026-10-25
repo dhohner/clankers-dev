@@ -380,7 +380,7 @@ class PrdBundleCliTests(unittest.TestCase):
 
             payload = load_yaml(result.stdout)
 
-            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.returncode, 1)
             self.assertEqual(payload["code"], "yaml_invalid")
             self.assertIn(
                 "YAML mapping contains duplicate key(s): schema_version",
@@ -427,7 +427,7 @@ class PrdBundleCliTests(unittest.TestCase):
 
             payload = load_yaml(result.stdout)
 
-            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.returncode, 1)
             self.assertEqual(payload["code"], "yaml_invalid")
             self.assertIn("line 1, column", payload["errors"][0]["message"])
             self.assertEqual(result.stderr, "")
@@ -445,7 +445,7 @@ class PrdBundleCliTests(unittest.TestCase):
 
             payload = load_yaml(result.stdout)
 
-            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.returncode, 1)
             self.assertEqual(payload["code"], "manifest_invalid")
             self.assertIn(
                 "schema_version must be the number 1 or the number 2",
@@ -466,7 +466,7 @@ class PrdBundleCliTests(unittest.TestCase):
             payload = load_yaml(result.stdout)
             messages = "\n".join(error["message"] for error in payload["errors"])
 
-            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.returncode, 1)
             self.assertEqual(payload["code"], "manifest_invalid")
             self.assertIn(
                 "blocks.design_tree is required by schema_version 2",
@@ -531,7 +531,7 @@ class PrdBundleCliTests(unittest.TestCase):
                     payload = load_yaml(result.stdout)
                     messages = "\n".join(error["message"] for error in payload["errors"])
 
-                    self.assertEqual(result.returncode, 2)
+                    self.assertEqual(result.returncode, 1)
                     self.assertEqual(payload["code"], "manifest_invalid")
                     self.assertIn(
                         "schema_version must be the number 1 or the number 2",
@@ -547,7 +547,7 @@ class PrdBundleCliTests(unittest.TestCase):
             result = run_cli("validate", str(manifest_path))
             payload = load_yaml(result.stdout)
 
-            self.assertEqual(result.returncode, 2)
+            self.assertEqual(result.returncode, 1)
             self.assertIn(
                 "schema_version must be the number 1 or the number 2",
                 payload["errors"][0]["message"],
@@ -582,7 +582,7 @@ class PrdBundleCliTests(unittest.TestCase):
 
             refused = run_generator(EXAMPLE, output_root)
             payload = load_yaml(refused.stdout)
-            self.assertEqual(refused.returncode, 2)
+            self.assertEqual(refused.returncode, 1)
             self.assertEqual(payload["code"], "bundle_exists")
             self.assertIn(" inspect", payload["next"][0])
             self.assertTrue(sentinel.exists())

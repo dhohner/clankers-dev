@@ -58,12 +58,22 @@ Options:
 
 - `--output-root <directory>` changes the bundle parent for `status` and `generate`.
 - `--force` replaces an existing bundle with the same slug after the new output validates.
-- `--format yaml|text` selects the output format, and non-template commands default to YAML.
-  The `interview` commands take no `--format`.
+- `--format toon|yaml` selects operational response encoding before or after the command, including `--format=value`.
+  Interview commands default to TOON; other commands default to YAML.
+  Successful templates always emit a YAML manifest.
+  Equal selectors may repeat; conflicting selectors fail.
 - `--full` expands large `validate` and `inspect` output.
 
 The CLI needs Python 3.14 or newer, without a virtual environment, package installation, or Node.js.
 Only `interview ask` and `interview open` use a browser, and they open the local default browser.
+Every command emits one response to stdout and sends progress to stderr.
+No command reads terminal answers.
+All commands use exit `0` for success, `1` for operation failure, and `2` for usage errors.
+A valid selector also encodes usage errors; unusable or conflicting selectors produce TOON.
+
+Read the [migration instructions](references/cli-migration.md) before updating a consumer.
+They describe text response removal, temporary YAML support, the eventual TOON default, its evidence gate, and exit code changes.
+Keep response decoding separate from YAML document parsing.
 
 ## Interview
 
@@ -90,7 +100,7 @@ python3 plugins/project-advisor/skills/to-prd/scripts/__main__.py interview end 
 - `interview end <session-dir>` ends the session and stops its server.
   - A second `interview end` on the same session succeeds.
 
-Each `interview` command prints results and errors to stdout in TOON format.
+Each `interview` command prints results and errors to stdout in TOON by default, or YAML with `--format yaml`.
 Both include `next` lines listing the commands that can follow.
 
 Exit codes:
@@ -116,6 +126,7 @@ The test suite does not need `playwright-cli` or a browser.
 
 ## References
 
+- `references/cli-migration.md`: response formats, compatibility notices, exit codes, and the promotion evidence gate.
 - `references/manifest-contract.md`: manifest versions and rules the CLI schema does not print.
 - `references/review-checklist.md`: full bundle checklist when inspection is insufficient.
 - `references/interview-page-checklist.md`: browser setup, conversation, and draft checks with `playwright-cli`.

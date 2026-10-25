@@ -15,10 +15,11 @@ from pathlib import Path
 from typing import Any
 from unittest import mock
 
-from support import NO_BROWSER_ENV, SKILL_DIR, ThreadOutput, run_cli, thread_output
+from support import NO_BROWSER_ENV, SKILL_DIR, ThreadOutput, load_yaml, run_cli, thread_output
 
 from interview_support import InterviewHarness, TimeLimitedTestCase
 from scripts.cli import parse_args
+from scripts.cli.response import UsageError
 from toon_reader import top_level_array, top_level_field, top_level_table
 
 COMMANDS = ("ask", "open", "status", "end")
@@ -392,10 +393,11 @@ class InterviewCommandSurfaceTests(InterviewCliTestCase):
                     top_level_array(result.stdout, "next")[0],
                 )
 
-    def test_format_flag_is_a_usage_error_for_interview_commands(self) -> None:
+    def test_format_flag_selects_yaml_for_interview_commands(self) -> None:
         result = self.interview("status", self.session, "--format", "yaml")
 
-        self.assert_toon_error(result, "usage_error", exit_code=2)
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(load_yaml(result.stdout)["state"], "no_session")
 
     def test_missing_arguments_give_usage_error_in_toon(self) -> None:
         cases = {
@@ -443,17 +445,15 @@ class InterviewCommandSurfaceTests(InterviewCliTestCase):
 
         self.assertIn("ROUND-01", ask.wait_started())
 
-    def test_format_flag_before_interview_is_a_usage_error_in_toon(self) -> None:
+    def test_format_flag_before_interview_selects_yaml(self) -> None:
         result = run_cli("--format", "yaml", "interview", "status", str(self.session))
 
-        faults = self.assert_toon_error(result, "usage_error", exit_code=2)
-        self.assertIn("--format", faults[0]["message"])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(load_yaml(result.stdout)["state"], "no_session")
 
     def test_parse_args_rejects_interview_group(self) -> None:
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
+        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(UsageError):
             parse_args(["interview"])
-
-        self.assertEqual(caught.exception.code, 2)
 
     def test_top_level_help_lists_interview_group(self) -> None:
         result = run_cli("--help")

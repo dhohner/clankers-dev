@@ -35,7 +35,9 @@ def command_schema(args: argparse.Namespace) -> dict[str, Any]:
                             "fix": "Use schema --authoring or schema <block> [block ...].",
                         }
                     ],
-                }
+                    "next": [next_command("schema --authoring"), next_command("schema <block>")],
+                },
+                exit_code=2,
             )
         return _authoring_schema()
     if blocks:
@@ -113,7 +115,13 @@ def _block_schema(block: str, compact: bool = False) -> dict[str, Any]:
                 "status": "error",
                 "code": "block_unknown",
                 "block": block,
-                "errors": [{"path": "block", "message": f"unknown block: {block}"}],
+                "errors": [
+                    {
+                        "path": "block",
+                        "message": f"unknown block: {block}",
+                        "fix": "Select a supported block listed by schema.",
+                    }
+                ],
                 "next": [next_command("schema"), next_command("examples")],
             }
         )

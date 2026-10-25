@@ -88,9 +88,19 @@ def command_generate(args: argparse.Namespace) -> dict[str, Any]:
         raise CliFailure(
             {
                 "status": "error",
-                "code": "bundle_exists",
-                "errors": [{"path": "bundle", "message": str(error)}],
-                "next": [next_command(f"generate {display_path(args.manifest)} --force")],
+                "code": "bundle_exists" if target.exists() or target.is_symlink() else "io_error",
+                "bundle": display_path(target),
+                "errors": [
+                    {
+                        "path": "bundle",
+                        "message": str(error),
+                        "fix": (
+                            "Inspect the target and output directory; "
+                            "use --force only for an intentional bundle replacement."
+                        ),
+                    }
+                ],
+                "next": [next_command(f"inspect {display_path(target)}")],
             }
         ) from error
     except RuntimeError as error:
@@ -98,17 +108,30 @@ def command_generate(args: argparse.Namespace) -> dict[str, Any]:
             {
                 "status": "error",
                 "code": "generator_failed",
-                "errors": [{"path": "bundle", "message": str(error)}],
+                "errors": [
+                    {
+                        "path": "bundle",
+                        "message": str(error),
+                        "fix": (
+                            "Validate the manifest and repair the generation fault before retrying."
+                        ),
+                    }
+                ],
                 "next": [next_command(f"validate {display_path(args.manifest)}")],
             },
-            3,
         ) from error
     except OSError as error:
         raise CliFailure(
             {
                 "status": "error",
                 "code": "io_error",
-                "errors": [{"path": "bundle", "message": str(error)}],
+                "errors": [
+                    {
+                        "path": "bundle",
+                        "message": str(error),
+                        "fix": "Use a writable output directory with free space, then retry.",
+                    }
+                ],
                 "next": [next_command(f"generate {display_path(args.manifest)}")],
             }
         ) from error
@@ -153,7 +176,14 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
     except BundleValidationError as error:
         messages = [part.strip() for part in str(error).split(";") if part.strip()]
         items, truncated = truncate(
-            [{"path": "bundle", "message": message} for message in messages],
+            [
+                {
+                    "path": "bundle",
+                    "message": message,
+                    "fix": "Repair the source manifest and regenerate the bundle.",
+                }
+                for message in messages
+            ],
             args.full,
         )
         payload: dict[str, Any] = {
@@ -171,13 +201,19 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
                 next_command(f"inspect {display_path(bundle)} --full"),
             )
         raise CliFailure(payload) from error
-    except OSError as error:
+    except (OSError, UnicodeError) as error:
         raise CliFailure(
             {
                 "status": "error",
                 "code": "bundle_unreadable",
                 "bundle": display_path(bundle),
-                "errors": [{"path": "bundle", "message": str(error)}],
+                "errors": [
+                    {
+                        "path": "bundle",
+                        "message": str(error),
+                        "fix": "Restore readable UTF-8 files or regenerate the bundle.",
+                    }
+                ],
                 "next": [next_command("status")],
             }
         ) from error

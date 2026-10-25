@@ -20,7 +20,13 @@ def command_examples(args: argparse.Namespace) -> dict[str, Any]:
                     "status": "error",
                     "code": "example_unknown",
                     "example": args.name,
-                    "errors": [{"path": "example", "message": f"unknown example: {args.name}"}],
+                    "errors": [
+                        {
+                            "path": "example",
+                            "message": f"unknown example: {args.name}",
+                            "fix": "Select a name listed by examples.",
+                        }
+                    ],
                     "next": [next_command("examples")],
                 }
             )

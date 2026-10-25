@@ -298,10 +298,10 @@ class InterviewHarness:
     def start_ask(self, round_file: Path) -> InProcessCommand:
         return self.start("ask", str(round_file))
 
-    def start_ask_process(self, round_file: Path) -> AskProcess:
+    def start_ask_process(self, round_file: Path, *extra_args: str) -> AskProcess:
         args = [sys.executable, "-m", "scripts", "interview", "ask"]
         ask = AskProcess(
-            [*args, str(self.session), str(round_file)],
+            [*args, str(self.session), str(round_file), *extra_args],
             self.process_env,
             self.root / f"ask-{len(self.processes)}.stderr",
         )

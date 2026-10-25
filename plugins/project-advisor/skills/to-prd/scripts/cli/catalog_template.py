@@ -24,6 +24,7 @@ def command_template(args: argparse.Namespace) -> dict[str, Any]:
                     {
                         "path": "blocks",
                         "message": "unknown block(s): " + ", ".join(unknown_blocks),
+                        "fix": "Select supported block names from schema.",
                     }
                 ],
                 "next": [
@@ -53,7 +54,14 @@ def command_template(args: argparse.Namespace) -> dict[str, Any]:
             {
                 "status": "error",
                 "code": "template_invalid",
-                "errors": [{"path": "template", "message": message} for message in error.errors],
+                "errors": [
+                    {
+                        "path": "template",
+                        "message": message,
+                        "fix": "Select compatible blocks using schema, then retry the template.",
+                    }
+                    for message in error.errors
+                ],
                 "next": [next_command("schema")],
             }
         ) from error

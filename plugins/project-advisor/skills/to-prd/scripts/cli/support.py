@@ -22,7 +22,7 @@ GERMAN_CANDIDATE = re.compile(
 
 
 class CliFailure(Exception):
-    def __init__(self, payload: dict[str, Any], exit_code: int = 2) -> None:
+    def __init__(self, payload: dict[str, Any], exit_code: int = 1) -> None:
         self.payload = payload
         self.exit_code = exit_code
 
@@ -83,13 +83,19 @@ def load_manifest(path: Path, full: bool = False) -> NormalizedManifest:
                 "next": [next_command("examples")],
             }
         ) from error
-    except OSError as error:
+    except (OSError, UnicodeError) as error:
         raise CliFailure(
             {
                 "status": "error",
                 "code": "manifest_unreadable",
                 "manifest": display_path(path),
-                "errors": [{"path": "manifest", "message": str(error)}],
+                "errors": [
+                    {
+                        "path": "manifest",
+                        "message": str(error),
+                        "fix": "Pass a readable UTF-8 YAML or JSON manifest file.",
+                    }
+                ],
                 "next": [next_command(f"validate {display_path(path)}")],
             }
         ) from error
@@ -162,11 +168,7 @@ def truncate(items: list[Any], full: bool, limit: int = 20) -> tuple[list[Any], 
 
 
 def _manifest_error_item(message: str) -> dict[str, str]:
-    item = {"path": _error_path(message), "message": message}
-    fix = _fix_for(message)
-    if fix:
-        item["fix"] = fix
-    return item
+    return {"path": _error_path(message), "message": message, "fix": _fix_for(message)}
 
 
 def _error_path(message: str) -> str:
@@ -201,7 +203,7 @@ def _fix_for(message: str) -> str:
         return "Include document and the initiative-specific review surface."
     if "must be a non-empty" in message:
         return "Provide the required value."
-    return ""
+    return "Repair the value using the schema and validate the manifest again."
 
 
 def _count_german_candidates(value: Any) -> int:
