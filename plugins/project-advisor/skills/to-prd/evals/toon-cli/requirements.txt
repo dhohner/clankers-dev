@@ -1,0 +1,2 @@
+# Development token measurement only; operational commands use the standard library.
+tiktoken==0.12.0
