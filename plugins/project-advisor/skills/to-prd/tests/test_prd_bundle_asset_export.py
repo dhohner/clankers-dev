@@ -11,7 +11,7 @@ from support import EXAMPLE, SOURCE_ASSETS, run_cli
 class BundleAssetExportTests(unittest.TestCase):
     def test_review_exports_only_required_assets_and_licenses(self) -> None:
         with tempfile.TemporaryDirectory() as scratch:
-            result = run_cli("generate", str(EXAMPLE), "--output-root", scratch)
+            result = run_cli("generate", str(EXAMPLE), "--output", scratch)
             self.assertEqual(result.returncode, 0, result.stderr)
             bundles = list(Path(scratch).glob("PRD-*"))
             self.assertEqual(len(bundles), 1)

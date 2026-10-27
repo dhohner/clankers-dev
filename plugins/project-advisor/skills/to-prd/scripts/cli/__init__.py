@@ -7,23 +7,26 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from ..yaml_manifest import dumps
 from . import interview
 from .commands import COMMANDS
-from .response import FormatError, ResponseParser, UsageError, emit, usage_payload
-from .support import DESCRIPTION, CliFailure, command_context
+from .support import CliFailure
 
 
 def _build_parser() -> argparse.ArgumentParser:
-    parser = ResponseParser(
+    parser = argparse.ArgumentParser(
         prog="to-prd",
-        description=DESCRIPTION,
-        epilog="Run browser interview rounds with `interview`; see interview --help.",
+        description="Validate, generate, inspect, and template YAML PRD review bundles.",
+        epilog=(
+            "Run browser interview rounds with `interview`, which prints TOON; "
+            "see interview --help. The other commands print YAML."
+        ),
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     status = subparsers.add_parser("status", help="show the workspace dashboard")
     status.add_argument("--output-root", type=Path, default=Path("action-items"))
-    status.add_argument("--full", action="store_true", help="show all drafts and live sessions")
+    status.add_argument("--format", choices=("yaml", "text"), default="yaml")
 
     validate = subparsers.add_parser("validate", help="validate a PRD YAML manifest")
     validate.add_argument("manifest", type=Path)
@@ -32,6 +35,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="show all validation detail",
     )
+    validate.add_argument("--format", choices=("yaml", "text"), default="yaml")
 
     generate = subparsers.add_parser("generate", help="generate a PRD bundle from YAML")
     generate.add_argument("manifest", type=Path)
@@ -41,6 +45,7 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="replace an existing generated bundle",
     )
+    generate.add_argument("--format", choices=("yaml", "text"), default="yaml")
 
     inspect = subparsers.add_parser("inspect", help="inspect a generated PRD bundle")
     inspect.add_argument("bundle", type=Path)
@@ -49,17 +54,16 @@ def _build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="include normalized manifest and full lists",
     )
+    inspect.add_argument("--format", choices=("yaml", "text"), default="yaml")
 
     schema = subparsers.add_parser("schema", help="show manifest schema summary")
     schema.add_argument("blocks", nargs="*", help="optional block names, such as requirements")
-    schema.add_argument(
-        "--full", action="store_true", help="show all blocks and complete contracts"
-    )
     schema.add_argument(
         "--authoring",
         action="store_true",
         help="show the compact initiative and block selection guide",
     )
+    schema.add_argument("--format", choices=("yaml", "text"), default="yaml")
 
     template = subparsers.add_parser("template", help="emit a placeholder PRD manifest")
     template.add_argument(
@@ -68,13 +72,11 @@ def _build_parser() -> argparse.ArgumentParser:
         required=True,
         help="block names to include",
     )
+    template.add_argument("--format", choices=("yaml",), default="yaml")
 
     examples = subparsers.add_parser("examples", help="list bundled example manifests")
     examples.add_argument("name", nargs="?", help="optional example name or stem")
-    examples.add_argument(
-        "--full", action="store_true", help="show all examples and complete detail"
-    )
-    subparsers.add_parser("interview", help="browser interview commands")
+    examples.add_argument("--format", choices=("yaml", "text"), default="yaml")
 
     return parser
 
@@ -83,39 +85,26 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     raw, output_format = _extract_format(list(sys.argv[1:] if argv is None else argv))
     if not raw:
         raw = ["status"]
-    args = _build_parser().parse_args(raw)
-    if args.command == "interview":
-        raise UsageError("use the interview parser for interview commands")
-    args.format = output_format[1] if output_format else "yaml"
-    return args
+    return _build_parser().parse_args([*raw, *output_format])
 
 
 def _extract_format(raw: list[str]) -> tuple[list[str], list[str]]:
     remaining: list[str] = []
-    selectors: list[str] = []
+    output_format: list[str] = []
     index = 0
     while index < len(raw):
         value = raw[index]
-        if value == "--":
-            remaining.extend(raw[index:])
-            break
-        if value == "--format":
-            if index + 1 == len(raw) or raw[index + 1].startswith("--"):
-                raise FormatError("--format requires toon or yaml")
-            selectors.append(raw[index + 1])
+        if value == "--format" and index + 1 < len(raw):
+            output_format = ["--format", raw[index + 1]]
             index += 2
             continue
         if value.startswith("--format="):
-            selectors.append(value.split("=", 1)[1])
+            output_format = ["--format", value.split("=", 1)[1]]
             index += 1
             continue
         remaining.append(value)
         index += 1
-    if any(value not in {"toon", "yaml"} for value in selectors):
-        raise FormatError("--format accepts only toon or yaml")
-    if len(set(selectors)) > 1:
-        raise FormatError("conflicting --format selectors; select one response format")
-    return remaining, ["--format", selectors[0]] if selectors else []
+    return remaining, output_format
 
 
 def _run(args: argparse.Namespace) -> dict[str, Any]:
@@ -125,35 +114,52 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     return command(args)
 
 
+def _emit(payload: dict[str, Any], output_format: str) -> None:
+    if output_format == "yaml":
+        print(dumps(payload).rstrip())
+        return
+    print(_text(payload))
+
+
+def _text(value: Any, indent: int = 0) -> str:
+    space = "  " * indent
+    if isinstance(value, dict):
+        lines: list[str] = []
+        for key, item in value.items():
+            if isinstance(item, (dict, list)):
+                lines.append(f"{space}{key}:")
+                lines.append(_text(item, indent + 1))
+            else:
+                lines.append(f"{space}{key}: {item}")
+        return "\n".join(lines)
+    if isinstance(value, list):
+        if not value:
+            return f"{space}(none)"
+        lines = []
+        for item in value:
+            if isinstance(item, (dict, list)):
+                lines.append(f"{space}-")
+                lines.append(_text(item, indent + 1))
+            else:
+                lines.append(f"{space}- {item}")
+        return "\n".join(lines)
+    return f"{space}{value}"
+
+
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
+    remaining, output_format = _extract_format(raw)
+    if remaining[:1] == ["interview"]:
+        # The interview commands take no --format, so it reaches their parser as an unknown flag.
+        return interview.main([*remaining[1:], *output_format])
+    args = parse_args(raw)
     try:
-        remaining, selector = _extract_format(raw)
-    except FormatError as error:
-        emit(usage_payload(str(error), raw), "toon")
-        return 2
-    is_interview = remaining[:1] == ["interview"]
-    output_format = selector[1] if selector else ("toon" if is_interview else "yaml")
-    explicit_format = selector[1] if selector else None
-    if remaining[:1] == ["template"] and explicit_format == "yaml":
-        explicit_format = None
-    with command_context(explicit_format):
-        try:
-            if is_interview:
-                payload = interview.run(remaining[1:])
-            else:
-                args = parse_args(raw)
-                payload = _run(args)
-                if args.command == "template":
-                    output_format = "yaml"
-            exit_code = 0
-        except UsageError as error:
-            payload = usage_payload(str(error), remaining)
-            exit_code = 2
-        except (CliFailure, interview.InterviewFailure) as error:
-            payload = error.payload
-            exit_code = error.exit_code if isinstance(error, CliFailure) else 1
-    emit(payload, output_format)
+        payload = _run(args)
+        exit_code = 0
+    except CliFailure as error:
+        payload = error.payload
+        exit_code = error.exit_code
+    _emit(payload, args.format)
     return exit_code
 
 

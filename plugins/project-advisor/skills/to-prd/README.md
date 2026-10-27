@@ -58,54 +58,12 @@ Options:
 
 - `--output-root <directory>` changes the bundle parent for `status` and `generate`.
 - `--force` replaces an existing bundle with the same slug after the new output validates.
-- `--format toon|yaml` selects operational response encoding before or after the command, including `--format=value`.
-  Interview commands default to TOON; other commands default to YAML.
-  Successful templates always emit a YAML manifest.
-  On template, `--format yaml` selects the document representation.
-  Equal selectors may repeat; conflicting selectors fail.
-- `--full` returns complete discovery collections and detail on `status`, `schema`, `examples`, `validate`, and `inspect`.
-  Selected schemas and successful template documents are complete by default.
+- `--format yaml|text` selects the output format, and non-template commands default to YAML.
+  The `interview` commands take no `--format`.
+- `--full` expands large `validate` and `inspect` output.
 
 The CLI needs Python 3.14 or newer, without a virtual environment, package installation, or Node.js.
 Only `interview ask` and `interview open` use a browser, and they open the local default browser.
-Every command emits one response to stdout and sends progress to stderr.
-No command reads terminal answers.
-All commands use exit `0` for success, `1` for operation failure, and `2` for usage errors.
-A valid selector also encodes usage errors; unusable or conflicting selectors produce TOON.
-
-Read the [migration instructions](references/cli-migration.md) before updating a consumer.
-They describe text response removal, temporary YAML support, the eventual TOON default, its evidence gate, and exit code changes.
-Keep response decoding separate from YAML document parsing.
-
-### Discovery and recovery
-
-Discovery collections return at most 20 items by default, and example titles return at most 200 Python string characters.
-Each bounded array keeps its existing response key and has `total_count`, `shown_count`, and `truncated` under `collection_metadata.<key>`.
-Example titles have character counts and a complete retrieval `command` under `text_metadata["examples[index].title"]`.
-The text metadata key is a literal field path, such as `examples[0].title`.
-Collection truncation describes omitted items; text truncation has separate metadata.
-Use `next` or the text retrieval command to retrieve omitted content with the same target and explicit response format.
-`schema --full` includes every block contract, and `schema --authoring --full` lists every selectable block.
-`inspect --full` includes every ID, section, asset, HTML ID, fragment link, and the complete normalized manifest.
-Interview answers, notes, comments, nested records, and recording instructions are complete in first delivery and replay.
-
-Run the CLI without arguments to see the workspace dashboard.
-It reports bundle totals, drafts, the latest bundle, live interview states, its executable path, and its command contract.
-The executable display uses `~` only within the home directory.
-The commands in `next` use executable paths and quote literal arguments for the shell.
-`<command> --help` and `interview <subcommand> --help` describe options, formats, exit codes, and relevant next actions.
-
-Use known paths from `next` and replace visible placeholders before running commands.
-Do not execute a suggestion that still contains placeholders.
-Preserve quoting when paths contain spaces, apostrophes, dollar signs, or shell syntax.
-An explicit operational format follows compatible suggestions.
-A template document selector does not become an operational response selector, and operational selectors do not transfer to templates.
-Template `--format toon` selects failure responses and can follow compatible recovery commands.
-Only `status` and `generate` accept `--output-root`.
-Inspection targets the actual bundle directory.
-After repairing a generation fault, its generation retry retains the output root and any explicit original `--force` request.
-A refusal or failed inspection does not authorize replacement.
-The caller must explicitly request replacement before using `--force`.
 
 ## Interview
 
@@ -132,7 +90,7 @@ python3 plugins/project-advisor/skills/to-prd/scripts/__main__.py interview end 
 - `interview end <session-dir>` ends the session and stops its server.
   - A second `interview end` on the same session succeeds.
 
-Each `interview` command prints results and errors to stdout in TOON by default, or YAML with `--format yaml`.
+Each `interview` command prints results and errors to stdout in TOON format.
 Both include `next` lines listing the commands that can follow.
 
 Exit codes:
@@ -158,7 +116,6 @@ The test suite does not need `playwright-cli` or a browser.
 
 ## References
 
-- `references/cli-migration.md`: response formats, compatibility notices, exit codes, and the promotion evidence gate.
 - `references/manifest-contract.md`: manifest versions and rules the CLI schema does not print.
 - `references/review-checklist.md`: full bundle checklist when inspection is insufficient.
 - `references/interview-page-checklist.md`: browser setup, conversation, and draft checks with `playwright-cli`.

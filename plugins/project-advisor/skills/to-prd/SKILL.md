@@ -23,60 +23,6 @@ Run every CLI command from the repository root:
 python3 plugins/project-advisor/skills/to-prd/scripts/__main__.py <command> [options]
 ```
 
-## Read CLI responses
-
-Operational commands accept `--format toon` or `--format yaml` before or after the command, including `--format=value`.
-Interview commands default to TOON.
-Other commands default to YAML during migration.
-Decode one response from stdout and read progress from stderr.
-No command reads terminal answers.
-Exit codes are `0` for success, `1` for operation failure, and `2` for usage errors.
-Failures include a stable `code`, `errors` with repair instructions, and `next` commands.
-Valid selectors also encode usage errors.
-Unusable or conflicting selectors produce TOON errors.
-
-Successful `template --blocks ...` always emits a complete YAML manifest.
-`--format yaml` selects the template document representation.
-Template failures use the selected response format or the YAML default.
-On template failure, `--format toon` remains an operational selector for compatible recovery commands.
-Keep document parsing separate from response decoding.
-Published `prd.yaml` remains the source for downstream skills.
-
-Discovery arrays show at most 20 items, and example titles show at most 200 Python string characters.
-Read `total_count`, `shown_count`, and `truncated` under `collection_metadata.<array-key>`.
-Text metadata uses literal field paths, such as `text_metadata["examples[0].title"]`, with character counts and a retrieval `command`.
-Use `--full` on `status`, `schema`, `examples`, `validate`, and `inspect` for complete requested collections and detail.
-Follow retrieval commands to preserve the target and explicit response format.
-Selected schemas, template documents, interview answers, comments, notes, recording instructions, and nested records are complete by default.
-
-Read [migration instructions](references/cli-migration.md) when updating a consumer.
-Text responses are removed.
-YAML response selection is temporary.
-TOON promotion requires passing tests, lower aggregate tokens, and controlled agent trials without observed regression.
-
-## Discover the workspace and recover
-
-Run the CLI without arguments, or run `status`, to discover the current workspace.
-The dashboard describes the CLI, formats, exit codes, bundle total, latest bundle, drafts, and live interview states.
-Its executable display uses `~` for a path inside the home directory.
-Only sessions started in the current workspace appear.
-Run `<command> --help` or `interview <subcommand> --help` for options and relevant next actions.
-
-Follow `next` commands after checking their paths and result state.
-Known paths are literal shell arguments.
-Replace visible placeholders such as `<prd.yaml>` and `<next-round-file>` before running a suggestion.
-Do not execute a suggestion that still contains placeholders.
-Preserve shell quoting when copying a command.
-The abbreviated executable display is for reading; use the executable command in `next`.
-
-Suggestions preserve explicit operational formats when the target uses the same selector meaning.
-Template document selectors and operational response selectors do not transfer between those command types.
-Pass `--output-root` only to `status` and `generate`.
-Pass the actual bundle directory to `inspect`.
-After repairing a generation fault, use its generation retry to retain the output root and any explicit replacement request.
-A refusal or failed inspection requires repair and an explicit caller decision before replacement.
-Use `--force` only when the caller requests replacement.
-
 ## Ground the decision
 
 For a revision, read the supplied `prd.yaml`, the published `action-items/PRD-*` bundle, the feedback, and answered open questions before proposing changes.
@@ -143,9 +89,7 @@ Grounding is complete when every visited branch is recorded, the frontier is emp
 
 `prd.yaml` is the source of truth, and `index.html` is generated output.
 
-For a new PRD, choose `initiative_type`, and take its required review surfaces from `schema --authoring`.
-Use `schema --authoring --full` when you need every selectable block.
-Add a block only when it improves a product decision.
+For a new PRD, choose `initiative_type`, take its required review surfaces from `schema --authoring`, and add a block only when it improves a product decision.
 Run one `schema` call for the selected blocks, then add their `template --blocks` shapes to the scratch manifest.
 Use `examples/minimal-prd.yaml` as the skeleton, `examples/fixtures/` for one focused surface, and `examples/basic-prd.yaml` only for a broad mixed initiative.
 Read [references/manifest-contract.md](references/manifest-contract.md) when CLI output and validation errors leave a rule unclear.
@@ -200,7 +144,7 @@ An acceptance recorded only in chat blocks the handoff, because `to-issues` and 
 On acceptance:
 
 1. Set `status: Accepted` in the working manifest and change nothing else.
-2. Rerun `validate`, then `generate --force` with the same `--output-root`, and inspect the actual published bundle directory.
+2. Rerun `validate`, `generate --force`, and `inspect` with the same `--output-root`, so the published bundle carries the accepted source.
 3. Report the published `action-items/PRD-<slug>/prd.yaml` path.
 
 Then offer `to-issues` for Jira-ready tickets, `to-agent-tasks` for coding-agent work packages, or no handoff, and invoke the chosen skill with the published `prd.yaml`.

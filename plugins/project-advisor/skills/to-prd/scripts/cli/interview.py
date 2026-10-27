@@ -1,4 +1,4 @@
-"""Browser interview commands with the common operational response contract."""
+"""The `interview` command group, which prints TOON and uses AXI exit codes."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import shlex
 import sys
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from ..interview import Round, RoundError, validate_round
 from ..interview.client import (
@@ -42,11 +42,22 @@ from ..interview.session import (
     summarize,
     write_state,
 )
+from ..toon import dumps
 from ..yaml_manifest import YamlError, loads
-from .response import ResponseParser
 from .support import display_path, next_command
 
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_USAGE = 2
+COMMANDS = ("ask", "open", "status", "end")
 SESSION_EXCLUDED_DIR = "action-items"
+
+GROUP_EPILOG = """\
+Each interview command prints TOON to stdout, for a result and for an error.
+Exit codes: 0 success, 1 error, 2 unknown flag or usage error.
+No command reads terminal input.
+The other commands print YAML.
+"""
 
 ROUND_FILE_HELP = """\
 The round file is YAML or JSON:
@@ -68,7 +79,12 @@ The round file is YAML or JSON:
           recommended: true
 
 An invalid round prints every fault with a path and a fix, exits with 1, and opens no round.
+Prints TOON to stdout.
 """
+
+
+class UsageError(Exception):
+    pass
 
 
 class InterviewFailure(Exception):
@@ -77,10 +93,18 @@ class InterviewFailure(Exception):
         self.payload = payload
 
 
-def _build_parser() -> ResponseParser:
-    parser = ResponseParser(
+class ToonArgumentParser(argparse.ArgumentParser):
+    """Raise usage errors so the caller prints them as TOON instead of plain usage text."""
+
+    def error(self, message: str) -> NoReturn:
+        raise UsageError(message)
+
+
+def _build_parser() -> ToonArgumentParser:
+    parser = ToonArgumentParser(
         prog="to-prd interview",
-        description="Run browser interview rounds for a PRD session.",
+        description="Run browser interview rounds for a PRD session. Prints TOON to stdout.",
+        epilog=GROUP_EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -88,7 +112,7 @@ def _build_parser() -> ResponseParser:
     ask = subparsers.add_parser(
         "ask",
         help="ask one round in the browser and print the answers",
-        description="Validate a round file and ask it in the browser.",
+        description="Validate a round file and ask it in the browser. Prints TOON to stdout.",
         epilog=ROUND_FILE_HELP,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -103,7 +127,8 @@ def _build_parser() -> ResponseParser:
         command = subparsers.add_parser(
             name,
             help=summary,
-            description=f"{summary.capitalize()}.",
+            description=f"{summary.capitalize()}. Prints TOON to stdout.",
+            epilog=GROUP_EPILOG,
             formatter_class=argparse.RawDescriptionHelpFormatter,
         )
         _session_argument(command)
@@ -119,27 +144,20 @@ def _session_argument(parser: argparse.ArgumentParser) -> None:
 
 
 def main(argv: list[str]) -> int:
-    from . import main as cli_main
-
-    return cli_main(["interview", *argv])
-
-
-def run(argv: list[str]) -> dict[str, Any]:
-    args = _build_parser().parse_args(argv)
     try:
-        return HANDLERS[args.command](args)
-    except OSError as error:
-        retry = f"{args.command} {_quoted(args.session_dir)}"
-        if args.command == "ask":
-            retry += f" {_quoted(args.round_file)}"
-        raise _failure(
-            "session_io_error",
-            "session_dir",
-            f"cannot run interview {args.command} for {display_path(args.session_dir)}: {error}",
-            "Repair conflicting session paths or permissions, check free disk space, then retry.",
-            [_interview_command(retry)],
-            session=display_path(args.session_dir),
-        ) from error
+        args = _build_parser().parse_args(argv)
+    except UsageError as error:
+        return _emit(_usage_payload(str(error), argv), EXIT_USAGE)
+    try:
+        payload = HANDLERS[args.command](args)
+    except InterviewFailure as failure:
+        return _emit(failure.payload, EXIT_ERROR)
+    return _emit(payload, EXIT_OK)
+
+
+def _emit(payload: dict[str, Any], exit_code: int) -> int:
+    print(dumps(payload))
+    return exit_code
 
 
 def command_ask(args: argparse.Namespace) -> dict[str, Any]:
@@ -296,7 +314,7 @@ def resolve_session(path: Path, retry_arguments: str) -> Path:
             "session_dir",
             f"{path} does not exist",
             "Create the session directory outside action-items/, then run the command again.",
-            [_interview_command(retry_arguments.replace("<session-dir>", _quoted(path), 1))],
+            retry,
             session=str(path),
         ) from error
     except OSError as error:
@@ -331,10 +349,8 @@ def resolve_session(path: Path, retry_arguments: str) -> Path:
 
 def load_round(path: Path, session: Path) -> Round:
     """Parse and validate one round file, or fail with every fault found."""
-    retry = [
-        _interview_command(f"ask {_quoted(session)} {_quoted(path)}"),
-        _interview_command("ask --help"),
-    ]
+    retry = [_interview_command(f"ask {_quoted(session)} {_quoted(path)}")]
+    help_command = _interview_command("ask --help")
     fields = {"session": display_path(session), "round_file": display_path(path)}
     try:
         raw = loads(path.read_text(encoding="utf-8"))
@@ -344,7 +360,7 @@ def load_round(path: Path, session: Path) -> Round:
             "round_file",
             f"{path} does not exist",
             "Write the round file, then pass its path.",
-            retry,
+            [_interview_command(f"ask {_quoted(session)} <round-file>"), help_command],
             **fields,
         ) from error
     except YamlError as error:
@@ -353,7 +369,7 @@ def load_round(path: Path, session: Path) -> Round:
             "round",
             f"line {error.line}, {error}",
             "Repair the YAML or JSON syntax of the round file.",
-            retry,
+            [*retry, help_command],
             **fields,
         ) from error
     except (OSError, UnicodeDecodeError) as error:
@@ -362,7 +378,7 @@ def load_round(path: Path, session: Path) -> Round:
             "round_file",
             f"cannot read {path}: {error}",
             "Pass a readable UTF-8 round file.",
-            retry,
+            [*retry, help_command],
             **fields,
         ) from error
     try:
@@ -372,7 +388,7 @@ def load_round(path: Path, session: Path) -> Round:
             _error_payload(
                 "round_invalid",
                 error.faults,
-                retry,
+                [*retry, help_command],
                 **fields,
                 total_errors=len(error.faults),
             )
@@ -557,6 +573,16 @@ def _ask_again(session: Path, round_file: Path) -> list[str]:
         _interview_command(f"ask {_quoted(session)} {_quoted(round_file)}"),
         _interview_command(f"end {_quoted(session)}"),
     ]
+
+
+def _usage_payload(message: str, argv: list[str]) -> dict[str, Any]:
+    command = argv[0] if argv and argv[0] in COMMANDS else ""
+    help_command = _interview_command(f"{command} --help" if command else "--help")
+    return _error_payload(
+        "usage_error",
+        [{"path": "arguments", "message": message, "fix": f"Run {help_command} for the usage."}],
+        [help_command],
+    )
 
 
 def _failure(

@@ -7,11 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from ..yaml_manifest import YamlError, loads
-from .support import SKILL_DIR, CliFailure, bound_collection, bound_text, display_path, next_command
+from .support import SKILL_DIR, CliFailure, display_path, next_command
 
 
 def command_examples(args: argparse.Namespace) -> dict[str, Any]:
-    full = getattr(args, "full", False)
     paths = _example_paths()
     if args.name:
         paths = [path for path in paths if args.name in {path.stem, path.name}]
@@ -21,34 +20,20 @@ def command_examples(args: argparse.Namespace) -> dict[str, Any]:
                     "status": "error",
                     "code": "example_unknown",
                     "example": args.name,
-                    "errors": [
-                        {
-                            "path": "example",
-                            "message": f"unknown example: {args.name}",
-                            "fix": "Select a name listed by examples.",
-                        }
-                    ],
+                    "errors": [{"path": "example", "message": f"unknown example: {args.name}"}],
                     "next": [next_command("examples")],
                 }
             )
+    examples = [_example_item(path) for path in paths]
     next_steps = (
         [
-            next_command("validate", display_path(paths[0])),
-            next_command("generate", display_path(paths[0])),
+            next_command(f"validate {examples[0]['path']}"),
+            next_command(f"generate {examples[0]['path']}"),
         ]
-        if paths
-        else [next_command("schema --authoring"), next_command("template --blocks design_tree")]
+        if examples
+        else []
     )
-    payload = {"status": "ok", "examples": paths, "next": next_steps}
-    retrieval = next_command("examples", "--full", *(["--", args.name] if args.name else []))
-    bound_collection(payload, "examples", full, retrieval)
-    payload["examples"] = [_example_item(path) for path in payload["examples"]]
-    for index, item in enumerate(payload["examples"]):
-        if isinstance(item.get("title"), str):
-            item["title"] = bound_text(
-                payload, f"examples[{index}].title", item["title"], full, retrieval
-            )
-    return payload
+    return {"status": "ok", "examples": examples, "next": next_steps}
 
 
 def _example_paths() -> list[Path]:
@@ -68,7 +53,7 @@ def _example_item(path: Path) -> dict[str, Any]:
     item: dict[str, Any] = {"name": path.stem, "path": display_path(path)}
     try:
         raw = loads(path.read_text(encoding="utf-8"))
-    except YamlError, OSError, UnicodeError:
+    except YamlError, OSError:
         return item
     if isinstance(raw, dict):
         for field in ("title", "initiative_type"):

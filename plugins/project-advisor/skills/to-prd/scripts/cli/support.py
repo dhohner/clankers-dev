@@ -5,9 +5,6 @@ from __future__ import annotations
 import re
 import shlex
 import sys
-from collections.abc import Iterator
-from contextlib import contextmanager
-from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
@@ -18,8 +15,6 @@ from ..yaml_manifest import YamlError, loads
 
 SKILL_DIR = Path(__file__).resolve().parents[2]
 ENTRYPOINT = SKILL_DIR / "scripts" / "__main__.py"
-DESCRIPTION = "Validate, generate, inspect, and template YAML PRD review bundles."
-_response_format: ContextVar[str | None] = ContextVar("response_format", default=None)
 GERMAN_CANDIDATE = re.compile(
     r"[äöüÄÖÜß]|\b(und|oder|nicht|für|mit|ohne|wenn|dann|ist|sind)\b",
     re.IGNORECASE,
@@ -27,60 +22,26 @@ GERMAN_CANDIDATE = re.compile(
 
 
 class CliFailure(Exception):
-    def __init__(self, payload: dict[str, Any], exit_code: int = 1) -> None:
+    def __init__(self, payload: dict[str, Any], exit_code: int = 2) -> None:
         self.payload = payload
         self.exit_code = exit_code
 
 
-def display_executable() -> str:
-    path = Path(sys.argv[0]).resolve()
+def display_path(path: Path) -> str:
     try:
-        return str(Path("~") / path.relative_to(Path.home()))
-    except ValueError:
+        return str(path.resolve().relative_to(Path.cwd().resolve()))
+    except OSError, ValueError:
         return str(path)
 
 
-def display_path(path: Path) -> str:
-    try:
-        displayed = str(path.resolve().relative_to(Path.cwd().resolve()))
-    except OSError, ValueError:
-        displayed = str(path)
-    return f"./{displayed}" if displayed.startswith("-") else displayed
-
-
-@contextmanager
-def command_context(response_format: str | None) -> Iterator[None]:
-    token = _response_format.set(response_format)
-    try:
-        yield
-    finally:
-        _response_format.reset(token)
-
-
-def next_command(
-    command: str,
-    *arguments: str | Path,
-    output_root: Path | None = None,
-    force: bool = False,
-) -> str:
-    target = command.split()[0]
-    values = list(arguments)
-    if output_root is not None and target in {"status", "generate"}:
-        values.extend(("--output-root", display_path(output_root)))
-    if force and target == "generate":
-        values.append("--force")
-    selector = _response_format.get()
-    if selector and target != "template":
-        option_end = values.index("--") if "--" in values else len(values)
-        values[option_end:option_end] = ["--format", selector]
-    literals = "".join(f" {shlex.quote(str(value))}" for value in values)
-    return f"{_cli_name()} {command}{literals}"
+def next_command(command: str) -> str:
+    return f"{_cli_name()} {command}"
 
 
 def _cli_name() -> str:
     entrypoint = Path(sys.argv[0])
     if entrypoint.suffix == ".py":
-        return f"{shlex.quote(sys.executable)} {shlex.quote(display_path(entrypoint))}"
+        return f"python3 {shlex.quote(display_path(entrypoint))}"
     return shlex.quote(display_path(entrypoint))
 
 
@@ -101,7 +62,7 @@ def load_manifest(path: Path, full: bool = False) -> NormalizedManifest:
                     }
                 ],
                 "next": [
-                    next_command("validate", display_path(path)),
+                    next_command(f"validate {display_path(path)}"),
                     next_command("examples"),
                 ],
             }
@@ -119,26 +80,17 @@ def load_manifest(path: Path, full: bool = False) -> NormalizedManifest:
                         "fix": "Pass an existing YAML manifest path.",
                     }
                 ],
-                "next": [
-                    next_command("validate", display_path(path)),
-                    next_command("examples"),
-                ],
+                "next": [next_command("examples")],
             }
         ) from error
-    except (OSError, UnicodeError) as error:
+    except OSError as error:
         raise CliFailure(
             {
                 "status": "error",
                 "code": "manifest_unreadable",
                 "manifest": display_path(path),
-                "errors": [
-                    {
-                        "path": "manifest",
-                        "message": str(error),
-                        "fix": "Pass a readable UTF-8 YAML or JSON manifest file.",
-                    }
-                ],
-                "next": [next_command("validate", display_path(path))],
+                "errors": [{"path": "manifest", "message": str(error)}],
+                "next": [next_command(f"validate {display_path(path)}")],
             }
         ) from error
 
@@ -146,34 +98,34 @@ def load_manifest(path: Path, full: bool = False) -> NormalizedManifest:
         return validate_manifest(raw)
     except ManifestError as error:
         items = [_manifest_error_item(message) for message in error.errors]
+        shown, truncated = truncate(items, full)
         payload: dict[str, Any] = {
             "status": "error",
             "code": "manifest_invalid",
             "manifest": display_path(path),
             "total_errors": len(items),
-            "errors": items,
+            "errors": shown,
             "next": [
-                next_command("validate", display_path(path)),
                 next_command("schema requirements"),
                 next_command("examples api-heavy"),
             ],
         }
-        bound_collection(
-            payload, "errors", full, next_command("validate", display_path(path), "--full")
-        )
-        payload["truncated"] = payload["collection_metadata"]["errors"]["truncated"]
+        if truncated:
+            payload["truncated"] = True
+            payload["next"].insert(
+                0,
+                next_command(f"validate {display_path(path)} --full"),
+            )
         raise CliFailure(payload) from error
 
 
-def validation_payload(
-    manifest: NormalizedManifest, manifest_path: Path, full: bool = False
-) -> dict[str, Any]:
+def validation_payload(manifest: NormalizedManifest, manifest_path: Path) -> dict[str, Any]:
     manifest_summary = summary(manifest)
     german_candidates = manifest_summary["untranslated_german_candidates"]
     warnings = []
     if german_candidates:
         warnings.append(f"review {german_candidates} possible untranslated German string(s)")
-    payload = {
+    return {
         "status": "ok",
         "manifest": display_path(manifest_path),
         "manifest_version": manifest["schema_version"],
@@ -184,14 +136,10 @@ def validation_payload(
         "summary": manifest_summary,
         "warnings": warnings,
         "next": [
-            next_command("generate", display_path(manifest_path)),
+            next_command(f"generate {display_path(manifest_path)}"),
             next_command("schema requirements"),
         ],
     }
-    retrieval = next_command("validate", display_path(manifest_path), "--full")
-    for name in ("review_surfaces", "selected_blocks", "missing_traceability", "warnings"):
-        bound_collection(payload, name, full, retrieval)
-    return payload
 
 
 def summary(manifest: NormalizedManifest) -> dict[str, int]:
@@ -207,34 +155,6 @@ def summary(manifest: NormalizedManifest) -> dict[str, int]:
     }
 
 
-def bound_collection(payload: dict[str, Any], name: str, full: bool, retrieval: str) -> None:
-    """Bound one discovery collection; callers must exclude authoritative content."""
-    items = payload[name]
-    shown, truncated = truncate(items, full)
-    payload[name] = shown
-    payload.setdefault("collection_metadata", {})[name] = {
-        "total_count": len(items),
-        "shown_count": len(shown),
-        "truncated": truncated,
-    }
-    if truncated and retrieval not in payload["next"]:
-        payload["next"].insert(0, retrieval)
-
-
-def bound_text(payload: dict[str, Any], path: str, text: str, full: bool, retrieval: str) -> str:
-    shown = text if full else text[:200]
-    truncated = len(shown) < len(text)
-    payload.setdefault("text_metadata", {})[path] = {
-        "total_characters": len(text),
-        "shown_characters": len(shown),
-        "truncated": truncated,
-        "command": retrieval,
-    }
-    if truncated and retrieval not in payload["next"]:
-        payload["next"].insert(0, retrieval)
-    return shown
-
-
 def truncate(items: list[Any], full: bool, limit: int = 20) -> tuple[list[Any], bool]:
     if full or len(items) <= limit:
         return items, False
@@ -242,7 +162,11 @@ def truncate(items: list[Any], full: bool, limit: int = 20) -> tuple[list[Any], 
 
 
 def _manifest_error_item(message: str) -> dict[str, str]:
-    return {"path": _error_path(message), "message": message, "fix": _fix_for(message)}
+    item = {"path": _error_path(message), "message": message}
+    fix = _fix_for(message)
+    if fix:
+        item["fix"] = fix
+    return item
 
 
 def _error_path(message: str) -> str:
@@ -277,7 +201,7 @@ def _fix_for(message: str) -> str:
         return "Include document and the initiative-specific review surface."
     if "must be a non-empty" in message:
         return "Provide the required value."
-    return "Repair the value using the schema and validate the manifest again."
+    return ""
 
 
 def _count_german_candidates(value: Any) -> int:
@@ -294,8 +218,6 @@ __all__ = [
     "ENTRYPOINT",
     "SKILL_DIR",
     "CliFailure",
-    "bound_collection",
-    "bound_text",
     "display_path",
     "load_manifest",
     "next_command",

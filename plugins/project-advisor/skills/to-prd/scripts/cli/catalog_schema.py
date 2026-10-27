@@ -17,11 +17,10 @@ from ..spec import (
     SCHEMA_VERSIONS,
 )
 from .catalog_blocks import example_block
-from .support import CliFailure, bound_collection, next_command
+from .support import CliFailure, next_command
 
 
 def command_schema(args: argparse.Namespace) -> dict[str, Any]:
-    full = getattr(args, "full", False)
     blocks = list(getattr(args, "blocks", []))
     if getattr(args, "authoring", False):
         if blocks:
@@ -36,13 +35,9 @@ def command_schema(args: argparse.Namespace) -> dict[str, Any]:
                             "fix": "Use schema --authoring or schema <block> [block ...].",
                         }
                     ],
-                    "next": [next_command("schema --authoring"), next_command("schema <block>")],
-                },
-                exit_code=2,
+                }
             )
-        payload = _authoring_schema()
-        bound_collection(payload, "blocks", full, next_command("schema", "--authoring", "--full"))
-        return payload
+        return _authoring_schema()
     if blocks:
         if len(blocks) == 1:
             return _block_schema(blocks[0])
@@ -55,7 +50,7 @@ def command_schema(args: argparse.Namespace) -> dict[str, Any]:
                 next_command("validate <prd.yaml>"),
             ],
         }
-    payload = {
+    return {
         "status": "ok",
         "schema_version": CURRENT_SCHEMA_VERSION,
         "accepted_manifest_versions": list(SCHEMA_VERSIONS),
@@ -81,7 +76,6 @@ def command_schema(args: argparse.Namespace) -> dict[str, Any]:
                 "title": spec.title,
                 "kind": spec.kind,
                 "fields": list(spec.fields),
-                **(_block_schema(name, compact=True) if full else {}),
             }
             for name, spec in BLOCK_SPECS.items()
         ],
@@ -90,8 +84,6 @@ def command_schema(args: argparse.Namespace) -> dict[str, Any]:
             next_command("examples minimal-prd"),
         ],
     }
-    bound_collection(payload, "blocks", full, next_command("schema", "--full"))
-    return payload
 
 
 def _authoring_schema() -> dict[str, Any]:
@@ -121,13 +113,7 @@ def _block_schema(block: str, compact: bool = False) -> dict[str, Any]:
                 "status": "error",
                 "code": "block_unknown",
                 "block": block,
-                "errors": [
-                    {
-                        "path": "block",
-                        "message": f"unknown block: {block}",
-                        "fix": "Select a supported block listed by schema.",
-                    }
-                ],
+                "errors": [{"path": "block", "message": f"unknown block: {block}"}],
                 "next": [next_command("schema"), next_command("examples")],
             }
         )

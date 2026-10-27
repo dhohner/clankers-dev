@@ -215,8 +215,8 @@ class AskProcess:
             text=True,
         )
 
-    def wait_started(self, timeout: float = STEP_SECONDS) -> str:
-        deadline = time.monotonic() + timeout
+    def wait_started(self) -> str:
+        deadline = time.monotonic() + STEP_SECONDS
         while time.monotonic() < deadline:
             text = self.stderr_path.read_text(encoding="utf-8")
             if text.endswith("\n"):
@@ -298,10 +298,10 @@ class InterviewHarness:
     def start_ask(self, round_file: Path) -> InProcessCommand:
         return self.start("ask", str(round_file))
 
-    def start_ask_process(self, round_file: Path, *extra_args: str) -> AskProcess:
+    def start_ask_process(self, round_file: Path) -> AskProcess:
         args = [sys.executable, "-m", "scripts", "interview", "ask"]
         ask = AskProcess(
-            [*args, str(self.session), str(round_file), *extra_args],
+            [*args, str(self.session), str(round_file)],
             self.process_env,
             self.root / f"ask-{len(self.processes)}.stderr",
         )

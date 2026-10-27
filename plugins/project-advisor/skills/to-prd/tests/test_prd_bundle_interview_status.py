@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import shlex
 from pathlib import Path
 from typing import Any
 from unittest import mock
@@ -212,21 +211,6 @@ class WorkspaceStatusTests(InterviewTestCase):
         self.assertEqual(
             payload["interview_sessions"], [{"session": str(self.session), "state": "round_open"}]
         )
-
-    def test_dashboard_suggests_known_session_status_without_authentication_values(self) -> None:
-        # Exposing state files or omitting the known session prevents safe discovery.
-        self.start_session(SKILL_DIR)
-
-        payload = self.workspace_status()
-
-        commands = [shlex.split(step)[2:] for step in payload["next"]]
-        self.assertIn(["interview", "status", str(self.session)], commands)
-        encoded = json.dumps(payload)
-        self.assertFalse(
-            self.harness.token() in encoded, "dashboard exposes session authentication"
-        )
-        self.assertNotIn("token", encoded)
-        self.assertNotIn("http://", encoded)
 
     def test_status_omits_live_session_of_other_workspace(self) -> None:
         self.start_session(self.root)

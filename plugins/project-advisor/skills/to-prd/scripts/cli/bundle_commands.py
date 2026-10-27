@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import shlex
 from pathlib import Path
 from typing import Any
 
@@ -14,14 +13,13 @@ from ..manifest_types import NormalizedManifest
 from ..output_validation import BundleValidationError, _analyze_generated_bundle
 from ..spec import entity_blocks, iter_tree_nodes, tree_blocks
 from .support import (
-    DESCRIPTION,
+    ENTRYPOINT,
     CliFailure,
-    bound_collection,
-    display_executable,
     display_path,
     load_manifest,
     next_command,
     summary,
+    truncate,
 )
 
 
@@ -39,50 +37,30 @@ def command_status(args: argparse.Namespace) -> dict[str, Any]:
     drafts = [bundle / "prd.yaml" for bundle in bundles if (bundle / "prd.yaml").is_file()]
     next_steps = (
         [
-            f"open {shlex.quote(display_path(latest / 'index.html'))}",
-            next_command("inspect", display_path(latest)),
+            f"open {display_path(latest / 'index.html')}",
+            next_command(f"inspect {display_path(latest)}"),
         ]
         if latest
-        else [
-            next_command("validate <prd.yaml>"),
-            next_command("generate <prd.yaml>", output_root=root),
-        ]
+        else [next_command("validate <prd.yaml>"), next_command("generate <prd.yaml>")]
     )
-    sessions = live_sessions(Path.cwd())
-    next_steps.extend(
-        next_command("interview status", display_path(files.session)) for files in sessions
-    )
-    payload = {
+    return {
         "status": "ok",
         "workspace": display_path(Path.cwd()),
-        "generator": display_executable(),
-        "description": DESCRIPTION,
-        "response_formats": ["toon", "yaml"],
-        "response_defaults": {"interview": "toon", "other": "yaml"},
-        "template_format": "yaml document",
-        "exit_codes": {"success": 0, "operation_failure": 1, "usage_error": 2},
+        "generator": display_path(ENTRYPOINT),
         "output_root": display_path(root),
         "bundle_count": len(bundles),
         "latest_bundle": None if latest is None else display_path(latest),
         "existing_drafts": [display_path(path) for path in drafts],
         "interview_sessions": [
             {"session": display_path(files.session), "state": summarize(files).state}
-            for files in sessions
+            for files in live_sessions(Path.cwd())
         ],
         "next": next_steps,
     }
-    retrieval = next_command("status", "--full", output_root=root)
-    for name in ("existing_drafts", "interview_sessions"):
-        bound_collection(payload, name, getattr(args, "full", False), retrieval)
-    return payload
 
 
 def command_generate(args: argparse.Namespace) -> dict[str, Any]:
-    try:
-        manifest = load_manifest(args.manifest)
-    except CliFailure as error:
-        error.payload["next"].append(_generate_retry(args))
-        raise
+    manifest = load_manifest(args.manifest)
     target = args.output_root.resolve() / f"PRD-{manifest['slug']}"
     if (target.exists() or target.is_symlink()) and not args.force:
         display_target = display_path(target)
@@ -99,35 +77,20 @@ def command_generate(args: argparse.Namespace) -> dict[str, Any]:
                     }
                 ],
                 "next": [
-                    next_command("inspect", display_target),
-                    next_command("validate", display_path(args.manifest)),
+                    next_command(f"inspect {display_target}"),
+                    next_command(f"generate {display_path(args.manifest)} --force"),
                 ],
             }
         )
     try:
         bundle = generate_bundle(manifest, args.output_root, args.force)
     except FileExistsError as error:
-        target_exists = target.exists() or target.is_symlink()
         raise CliFailure(
             {
                 "status": "error",
-                "code": "bundle_exists" if target_exists else "io_error",
-                "bundle": display_path(target),
-                "errors": [
-                    {
-                        "path": "bundle",
-                        "message": str(error),
-                        "fix": (
-                            "Inspect the target and output directory; "
-                            "use --force only for an intentional bundle replacement."
-                        ),
-                    }
-                ],
-                "next": [
-                    next_command("inspect", display_path(target))
-                    if target_exists
-                    else _generate_retry(args)
-                ],
+                "code": "bundle_exists",
+                "errors": [{"path": "bundle", "message": str(error)}],
+                "next": [next_command(f"generate {display_path(args.manifest)} --force")],
             }
         ) from error
     except RuntimeError as error:
@@ -135,34 +98,18 @@ def command_generate(args: argparse.Namespace) -> dict[str, Any]:
             {
                 "status": "error",
                 "code": "generator_failed",
-                "errors": [
-                    {
-                        "path": "bundle",
-                        "message": str(error),
-                        "fix": (
-                            "Validate the manifest and repair the generation fault before retrying."
-                        ),
-                    }
-                ],
-                "next": [
-                    next_command("validate", display_path(args.manifest)),
-                    _generate_retry(args),
-                ],
+                "errors": [{"path": "bundle", "message": str(error)}],
+                "next": [next_command(f"validate {display_path(args.manifest)}")],
             },
+            3,
         ) from error
     except OSError as error:
         raise CliFailure(
             {
                 "status": "error",
                 "code": "io_error",
-                "errors": [
-                    {
-                        "path": "bundle",
-                        "message": str(error),
-                        "fix": "Use a writable output directory with free space, then retry.",
-                    }
-                ],
-                "next": [_generate_retry(args)],
+                "errors": [{"path": "bundle", "message": str(error)}],
+                "next": [next_command(f"generate {display_path(args.manifest)}")],
             }
         ) from error
 
@@ -177,8 +124,8 @@ def command_generate(args: argparse.Namespace) -> dict[str, Any]:
         "validation": {"manifest": "ok", "bundle": "ok"},
         "summary": summary(manifest),
         "next": [
-            f"open {shlex.quote(display_path(bundle / 'index.html'))}",
-            next_command("inspect", display_path(bundle)),
+            f"open {display_path(bundle / 'index.html')}",
+            next_command(f"inspect {display_path(bundle)}"),
         ],
     }
 
@@ -198,63 +145,40 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
                         "fix": "Generate the bundle before inspecting it.",
                     }
                 ],
-                "next": [
-                    next_command("status", output_root=bundle.parent),
-                    next_command("generate <prd.yaml>", output_root=bundle.parent),
-                ],
+                "next": [next_command("status"), next_command("generate <prd.yaml>")],
             }
         )
     try:
         analysis = _analyze_generated_bundle(bundle)
     except BundleValidationError as error:
-        messages = error.errors
-        items = [
-            {
-                "path": "bundle",
-                "message": message,
-                "fix": "Repair the source manifest and regenerate the bundle.",
-            }
-            for message in messages
-        ]
+        messages = [part.strip() for part in str(error).split(";") if part.strip()]
+        items, truncated = truncate(
+            [{"path": "bundle", "message": message} for message in messages],
+            args.full,
+        )
         payload: dict[str, Any] = {
             "status": "error",
             "code": "bundle_invalid",
             "bundle": display_path(bundle),
             "total_errors": len(messages),
             "errors": items,
-            "next": [
-                next_command("validate", display_path(bundle / "prd.yaml"))
-                if (bundle / "prd.yaml").is_file()
-                else next_command("validate <prd.yaml>"),
-                next_command(
-                    "generate", display_path(bundle / "prd.yaml"), output_root=bundle.parent
-                )
-                if (bundle / "prd.yaml").is_file()
-                else next_command("generate <prd.yaml>", output_root=bundle.parent),
-            ],
+            "next": [next_command(f"generate {display_path(bundle / 'prd.yaml')} --force")],
         }
-        bound_collection(
-            payload, "errors", args.full, next_command("inspect", display_path(bundle), "--full")
-        )
-        payload["truncated"] = payload["collection_metadata"]["errors"]["truncated"]
+        if truncated:
+            payload["truncated"] = True
+            payload["next"].insert(
+                0,
+                next_command(f"inspect {display_path(bundle)} --full"),
+            )
         raise CliFailure(payload) from error
-    except (OSError, UnicodeError) as error:
+    except OSError as error:
         raise CliFailure(
             {
                 "status": "error",
                 "code": "bundle_unreadable",
                 "bundle": display_path(bundle),
-                "errors": [
-                    {
-                        "path": "bundle",
-                        "message": str(error),
-                        "fix": "Restore readable UTF-8 files or regenerate the bundle.",
-                    }
-                ],
-                "next": [
-                    next_command("inspect", display_path(bundle)),
-                    next_command("status", output_root=bundle.parent),
-                ],
+                "errors": [{"path": "bundle", "message": str(error)}],
+                "next": [next_command("status")],
             }
         ) from error
 
@@ -272,7 +196,7 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
         },
         "sections": list(manifest["blocks"]),
         "ids": _entity_ids(manifest),
-        "assets": assets,
+        "assets": assets if args.full else assets[:20],
         "anchors": {
             "count": len(analysis.ids),
             "broken": sorted(set(analysis.fragment_links) - set(analysis.ids)),
@@ -280,31 +204,21 @@ def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
         "traceability": _traceability_summary(manifest),
         "validation": {"manifest": "ok", "bundle": "ok"},
         "next": [
-            f"open {shlex.quote(display_path(bundle / 'index.html'))}",
-            next_command("validate", display_path(bundle / "prd.yaml")),
+            f"open {display_path(bundle / 'index.html')}",
+            next_command(f"validate {display_path(bundle / 'prd.yaml')}"),
         ],
     }
-    retrieval = next_command("inspect", display_path(bundle), "--full")
-    for name in ("sections", "ids", "assets"):
-        bound_collection(payload, name, args.full, retrieval)
-    if payload["collection_metadata"]["assets"]["truncated"]:
+    if not args.full and len(assets) > 20:
         payload["assets_truncated"] = True
-    if not args.full and retrieval not in payload["next"]:
-        payload["next"].insert(0, retrieval)
+        payload["next"].insert(
+            0,
+            next_command(f"inspect {display_path(bundle)} --full"),
+        )
     if args.full:
         payload["html_ids"] = analysis.ids
         payload["fragment_links"] = analysis.fragment_links
         payload["normalized_manifest"] = manifest
     return payload
-
-
-def _generate_retry(args: argparse.Namespace) -> str:
-    return next_command(
-        "generate",
-        display_path(args.manifest),
-        output_root=args.output_root,
-        force=args.force,
-    )
 
 
 def _safe_mtime(path: Path) -> float:
