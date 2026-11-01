@@ -17,7 +17,7 @@ afterEach(() => child?.kill("SIGKILL"));
 
 afterAll(() => fixture?.dispose());
 
-it("loads the default extension with Pi 1.0.4 and releases fake processes through host lifecycle events", async () => {
+it("loads the default extension with Pi 1.4.0 and releases fake processes through host lifecycle events", async () => {
   const script = new URL("../fixtures/pi-integration.mjs", import.meta.url);
   child = spawn(process.execPath, [fileURLToPath(script)], {
     env: {
@@ -36,6 +36,6 @@ it("loads the default extension with Pi 1.0.4 and releases fake processes throug
     output += data;
   });
   const [code] = await once(child, "exit");
-  expect({ code, output }).toMatchObject({ code: 0 });
+  expect(code, output).toBe(0);
   expect(output).toContain("Pi lifecycle integration passed");
 }, 10000);

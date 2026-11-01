@@ -1,14 +1,41 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { join } from "node:path";
+import { stripTerminalSequences } from "@earendil-works/pi-tui";
+import { basename, join } from "node:path";
+import { createDesktopDelivery } from "./desktop-notification.ts";
 import { NotificationPreference, type PreferenceFileSystem } from "./notification-preference.ts";
 
 interface NotificationSession {
   enabled: boolean;
   store: NotificationPreference;
   tail: Promise<void>;
+  started?: number;
+  warned?: boolean;
 }
 
-export function installNotifications(pi: ExtensionAPI, filesystem?: PreferenceFileSystem): void {
+export interface DesktopNotice {
+  title: string;
+  body: string;
+}
+
+export interface NotificationDependencies {
+  platform?: NodeJS.Platform;
+  now?: () => number;
+  deliver?: (notice: DesktopNotice) => Promise<void>;
+}
+
+function displayLabel(value: string): string {
+  return stripTerminalSequences(value)
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, " ")
+    .trim();
+}
+
+export function installNotifications(
+  pi: ExtensionAPI,
+  filesystem?: PreferenceFileSystem,
+  dependencies: NotificationDependencies = {},
+): void {
+  const now = dependencies.now ?? (() => performance.now());
+  const deliver = dependencies.deliver ?? createDesktopDelivery();
   let current: NotificationSession | undefined;
   pi.on("session_start", async (_event, ctx) => {
     const session: NotificationSession = {
@@ -37,6 +64,47 @@ export function installNotifications(pi: ExtensionAPI, filesystem?: PreferenceFi
       return undefined;
     });
     await session.tail;
+  });
+  pi.on("agent_start", () => {
+    if (current && current.started === undefined) current.started = now();
+  });
+  pi.on("agent_settled", (event, ctx) => {
+    const session = current;
+
+    if (!session || session.started === undefined) return;
+    const started = session.started;
+    session.started = undefined;
+
+    if (
+      (dependencies.platform ?? process.platform) !== "darwin" ||
+      ctx.mode !== "tui" ||
+      event.aborted !== false ||
+      !session.enabled ||
+      now() - started < 30_000
+    )
+      return;
+    const name = ctx.sessionManager.getSessionName();
+
+    const labels = [basename(ctx.cwd), name].flatMap((value) => {
+      const label = value === undefined ? "" : displayLabel(value);
+
+      return label ? [label] : [];
+    });
+
+    const notice = { title: "Pi run ended", body: labels.join(" · ") };
+    setImmediate(() => {
+      void Promise.resolve()
+        .then(() => {
+          if (current === session) return deliver(notice);
+
+          return undefined;
+        })
+        .catch(() => {
+          if (current !== session || session.warned) return;
+          session.warned = true;
+          ctx.ui.notify("Could not submit Insomniac notification.", "warning");
+        });
+    });
   });
   pi.on("session_shutdown", () => {
     current = undefined;

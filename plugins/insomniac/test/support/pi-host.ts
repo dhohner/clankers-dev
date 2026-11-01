@@ -17,6 +17,7 @@ type FixtureContext = Pick<
 
 interface FixtureEvent {
   type: string;
+  aborted?: boolean;
 }
 
 type Handler = (event: FixtureEvent, ctx: ExtensionContext) => void | Promise<void>;
@@ -121,7 +122,7 @@ export function createPiHost(mode: ExtensionContext["mode"] = "tui") {
     },
   };
 
-  // SAFETY: The fixture checks the command API and every context member Insomniac reads; event payloads are ignored.
+  // SAFETY: The fixture checks the API and context members Insomniac reads and supplies settlement's aborted flag.
   const pi = fixtureAPI as ExtensionAPI;
 
   return {
@@ -136,7 +137,10 @@ export function createPiHost(mode: ExtensionContext["mode"] = "tui") {
       // SAFETY: The command uses only the checked ExtensionContext members, with no session control actions.
       await command.handler(args, ctx as ExtensionCommandContext);
     },
-    emit: (type: string) => [...(handlers.get(type) ?? [])].map((handler) => handler({ type }, ctx)),
+    emit: (type: string, aborted = abortController.signal.aborted) =>
+      [...(handlers.get(type) ?? [])].map((handler) =>
+        handler(type === "agent_settled" ? { type, aborted } : { type }, ctx),
+      ),
     render: (width = 100) => footer?.render(width).map(stripTerminalSequences).join("\n"),
     raw: (width = 100) => footer?.render(width).join("\n"),
     requestRender,

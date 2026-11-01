@@ -1,12 +1,36 @@
 // Load the actual Pi extension factory and dispatch lifecycle events through Pi's runner.
-// Only OS process creation is replaced: the fake executable holds no power assertion.
+// OS process creation and notification delivery are replaced; model networking is disabled.
 import assert from "node:assert/strict";
 import childProcess from "node:child_process";
+import { promisify } from "node:util";
 import { syncBuiltinESMExports } from "node:module";
 import { once } from "node:events";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 
 const realSpawn = childProcess.spawn;
+
+const realExecFile = childProcess.execFile;
+
+const desktopRequests = [];
+
+let elapsed = 0;
+
+Object.defineProperty(performance, "now", { value: () => elapsed });
+
+childProcess.execFile = (command, args, options, callback) => {
+  if (command !== "/usr/bin/osascript") return realExecFile(command, args, options, callback);
+  desktopRequests.push({ command, args, options });
+
+  return realExecFile(process.execPath, ["-e", ""], options, callback);
+};
+
+childProcess.execFile[promisify.custom] = (command, args, options) =>
+  new Promise((complete, reject) => {
+    childProcess.execFile(command, args, options, (error, stdout, stderr) => {
+      if (error) reject(error);
+      else complete({ stdout, stderr });
+    });
+  });
 
 const children = [];
 
@@ -21,6 +45,10 @@ childProcess.spawn = (command, args, options) => {
 syncBuiltinESMExports();
 
 const host = await import(process.env.INSOMNIAC_TEST_PI ?? "@earendil-works/pi-coding-agent");
+
+assert.equal(host.VERSION, "1.4.0");
+
+console.log(`Pi runtime: ${host.VERSION}`);
 
 const plugin = resolve(import.meta.dirname, "../../index.ts");
 
@@ -135,15 +163,24 @@ try {
   await runner.emit({ type: "agent_start" });
   assert.equal(children.length, 1);
   await once(children[0], "spawn");
+
+  elapsed = 30_000;
   assert.match(render(), /awake/u);
   assert.ok(renders > 0);
   await runner.emit({ type: "agent_end", messages: [] });
   await runner.emit({ type: "agent_start" });
   assert.equal(children.length, 1);
   assert.equal(live(children[0].pid), true);
-  await runner.emit({ type: "agent_settled" });
+  await runner.emit({ type: "agent_settled", aborted: false });
   assert.match(render(), /can sleep/u);
   await gone(children[0]);
+  await new Promise(setImmediate);
+  assert.equal(desktopRequests.length, 1, "qualified settlement submits one request");
+  assert.deepEqual(desktopRequests[0].args.slice(4), [
+    "--",
+    "Pi run ended",
+    `${basename(process.cwd())} · Demo review`,
+  ]);
   await runner.emit({ type: "agent_start" });
   await once(children[1], "spawn");
   await runner.emit({ type: "session_shutdown", reason: "reload" });

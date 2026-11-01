@@ -2,7 +2,7 @@
 
 ## Pi footer
 
-The plugin supports Homebrew Pi 1.0.4.
+The plugin supports Pi 1.4.0.
 
 ### Install Pi
 
@@ -22,7 +22,27 @@ Restart Pi, or run `/reload` in an existing TUI session, to load it automaticall
 
 Notifications default to enabled when no preference has been saved.
 Notification labels can expose the project folder name and optional session name.
-This control stores the preference for notification delivery; this version does not submit desktop notifications.
+In macOS interactive TUI sessions, an enabled run that lasts at least 30 seconds submits one standard desktop notification after final settlement.
+Exactly 30 seconds qualifies; shorter runs and cancelled runs produce no notice.
+Timing includes waiting, retries, recovery, compaction, and queued continuations from the first start.
+The effective preference at settlement applies, including a successful change during a run.
+Print, JSON, RPC, Linux, and Windows sessions submit no desktop requests.
+
+The title is `Pi run ended`.
+The body contains only the project folder name and, when present, the session name, separated by ` · `.
+Control characters are removed or rendered as spaces.
+The notice describes settlement and makes no claim that the task succeeded.
+It excludes full paths, prompts, responses, tool output, and error details.
+
+Insomniac uses macOS `osascript` to request a standard notification, with no sound request, custom click action, or terminal focus check.
+Return to the terminal manually to inspect the result.
+macOS controls permission, presentation, click behavior, and dismissal; Insomniac does not change those settings.
+A submitted request does not guarantee visible presentation: permission settings, Focus, or other macOS suppression may hide it without reporting an error.
+Detectable submission failures produce at most one terminal warning per session, with no automatic retry for that run.
+Later qualifying runs can attempt submission again.
+Sleep protection releases at settlement without waiting for delivery.
+Reload and session replacement discard pending application dispatch; accepted requests belong to macOS and cannot be retracted by Insomniac.
+Delivery history remains in memory and is never replayed after restart.
 
 Use these commands in Pi:
 
