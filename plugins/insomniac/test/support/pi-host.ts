@@ -1,4 +1,10 @@
-import { SessionManager, Theme, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import {
+  SessionManager,
+  Theme,
+  type ExtensionAPI,
+  type ExtensionContext,
+  type ExtensionCommandContext,
+} from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { vi } from "vitest";
 
@@ -7,16 +13,20 @@ type FooterFactory = NonNullable<Parameters<ExtensionContext["ui"]["setFooter"]>
 type FixtureContext = Pick<
   ExtensionContext,
   "signal" | "mode" | "hasUI" | "cwd" | "model" | "thinkingLevel" | "getContextUsage" | "sessionManager"
-> & { ui: Pick<ExtensionContext["ui"], "setFooter"> };
+> & { ui: Pick<ExtensionContext["ui"], "setFooter" | "notify"> };
 
 interface FixtureEvent {
   type: string;
 }
 
-type Handler = (event: FixtureEvent, ctx: ExtensionContext) => void;
+type Handler = (event: FixtureEvent, ctx: ExtensionContext) => void | Promise<void>;
+
+type Command = Parameters<ExtensionAPI["registerCommand"]>[1];
 
 export function createPiHost(mode: ExtensionContext["mode"] = "tui") {
   const handlers = new Map<string, Handler[]>();
+  const commands = new Map<string, Command>();
+  const notify = vi.fn<ExtensionContext["ui"]["notify"]>();
   const requestRender = vi.fn<Parameters<FooterFactory>[0]["requestRender"]>();
   const footerTui: Pick<Parameters<FooterFactory>[0], "requestRender"> = { requestRender };
 
@@ -66,6 +76,7 @@ export function createPiHost(mode: ExtensionContext["mode"] = "tui") {
     getContextUsage: () => usage,
     sessionManager: manager,
     ui: {
+      notify,
       setFooter: (factory) => {
         footer?.dispose?.();
         footer = factory?.(
@@ -91,7 +102,7 @@ export function createPiHost(mode: ExtensionContext["mode"] = "tui") {
   // SAFETY: Only Insomniac receives this context; FixtureContext checks every member it reads against the host contract.
   const ctx = fixtureContext as ExtensionContext;
 
-  const fixtureAPI: Pick<ExtensionAPI, "getThinkingLevel"> & {
+  const fixtureAPI: Pick<ExtensionAPI, "getThinkingLevel" | "registerCommand"> & {
     on: (event: string, handler: Handler) => () => void;
   } = {
     on: (event, handler) => {
@@ -105,15 +116,26 @@ export function createPiHost(mode: ExtensionContext["mode"] = "tui") {
       };
     },
     getThinkingLevel: () => "medium",
+    registerCommand: (name, command) => {
+      commands.set(name, command);
+    },
   };
 
-  // SAFETY: Insomniac registers only notification handlers here; they read context and ignore event payloads.
+  // SAFETY: The fixture checks the command API and every context member Insomniac reads; event payloads are ignored.
   const pi = fixtureAPI as ExtensionAPI;
 
   return {
     pi,
     ctx,
     manager,
+    notify,
+    command: async (args = "") => {
+      const command = commands.get("insomniac-notifications");
+
+      if (!command) throw new Error("Notification command is not registered");
+      // SAFETY: The command uses only the checked ExtensionContext members, with no session control actions.
+      await command.handler(args, ctx as ExtensionCommandContext);
+    },
     emit: (type: string) => [...(handlers.get(type) ?? [])].map((handler) => handler({ type }, ctx)),
     render: (width = 100) => footer?.render(width).map(stripTerminalSequences).join("\n"),
     raw: (width = 100) => footer?.render(width).join("\n"),

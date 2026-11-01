@@ -18,6 +18,51 @@ No Homebrew package files change, and unrelated Pi packages and settings remain 
 Installing the plugin directory installs only Insomniac; installing the repository root also installs other plugins.
 Restart Pi, or run `/reload` in an existing TUI session, to load it automatically.
 
+### Notification preference
+
+Notifications default to enabled when no preference has been saved.
+Notification labels can expose the project folder name and optional session name.
+This control stores the preference for notification delivery; this version does not submit desktop notifications.
+
+Use these commands in Pi:
+
+```text
+/insomniac-notifications
+/insomniac-notifications status
+/insomniac-notifications disable
+/insomniac-notifications enable
+```
+
+The first two commands report the current session's effective setting without writing a preference.
+The output reports whether notifications are enabled or disabled for this session.
+Enable and disable assign a value, so repeating either command keeps the same setting.
+A successful save changes this session before its next settlement and persists for future sessions.
+Other running sessions keep their own values until they restart or change the setting themselves.
+Commands within a session finish in invocation order.
+A failed save reports an error and retains the previous effective and saved values.
+An error after the saved file has been replaced reports a separate warning; the assignment remains committed.
+
+The preference is a JSON boolean in `<agent-dir>/insomniac-notifications.json`.
+Pi resolves `<agent-dir>` through `getAgentDir()`, normally `~/.pi/agent`.
+`PI_CODING_AGENT_DIR` selects an isolated directory for both reads and writes.
+The working directory and project trust do not select an override.
+Pi's `settings.json` is separate from this file.
+New preference files use permissions `0600`; replacement preserves the existing owner, group, and permission bits.
+If ownership cannot be preserved, the save fails without replacing the saved file.
+On macOS, a save or startup reset fails without replacing the saved file if the existing file or temporary replacement has an ACL.
+Insomniac checks ACLs with `/bin/ls` because Node's filesystem API cannot preserve them during replacement.
+If that inspection fails, the save also fails without replacing the saved file.
+Concurrent processes replace the complete value atomically, and the last successful replacement supplies the next session's value.
+
+If the file cannot be read, contains malformed JSON, or contains a value other than a boolean, Insomniac reports the error, disables notifications for the session, and resets the file to `false`.
+If resetting fails, it reports that error too and keeps this session disabled.
+After fixing the filesystem problem, an explicit enable or disable command can save again.
+
+For an isolated check, launch Pi from a scratch directory with `PI_CODING_AGENT_DIR` set to a temporary directory and this extension loaded.
+Run status, disable, and enable using the commands above; restart against the same directory after each assignment to check persistence.
+Use synthetic folder and session names such as `demo-project` and `Demo review` when inspecting output.
+No personal configuration file needs to be opened.
+
 ### Footer output
 
 The footer shows the model name (or identifier), thinking level for reasoning models, current context usage, and estimated session cost from Pi.

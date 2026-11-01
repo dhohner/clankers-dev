@@ -42,6 +42,8 @@ const models = await host.ModelRuntime.create({
 
 const sessionManager = host.SessionManager.inMemory();
 
+sessionManager.appendSessionInfo("Demo review");
+
 const runner = new host.ExtensionRunner(
   loaded.extensions,
   loaded.runtime,
@@ -58,8 +60,14 @@ let footer;
 
 let renders = 0;
 
+const notifications = [];
+
 runner.setUIContext(
   {
+    notify(message, type) {
+      notifications.push({ message, type });
+      console.log(`${type}: ${message}`);
+    },
     setFooter(factory) {
       footer?.dispose?.();
       footer = factory?.(
@@ -98,6 +106,23 @@ try {
   await runner.emit({ type: "session_start" });
   assert.match(render(), /can sleep/u);
   assert.match(render(), /~\$0\.000/u);
+  const preference = runner.getCommand("insomniac-notifications");
+  assert.ok(preference, "notification command must be registered");
+  const commandContext = runner.createCommandContext();
+  await preference.handler("status", commandContext);
+  await preference.handler("disable", commandContext);
+  await preference.handler("status", commandContext);
+  await runner.emit({ type: "session_shutdown", reason: "reload" });
+  await runner.emit({ type: "session_start" });
+  await preference.handler("status", runner.createCommandContext());
+  await preference.handler("enable", runner.createCommandContext());
+  assert.deepEqual(notifications, [
+    { message: "Insomniac notifications: enabled.", type: "info" },
+    { message: "Insomniac notifications: disabled.", type: "info" },
+    { message: "Insomniac notifications: disabled.", type: "info" },
+    { message: "Insomniac notifications: disabled.", type: "info" },
+    { message: "Insomniac notifications: enabled.", type: "info" },
+  ]);
   sessionManager.appendUsage("cache_warm", "test", "test", {
     input: 100,
     output: 0,
