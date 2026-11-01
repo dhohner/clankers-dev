@@ -8,6 +8,21 @@ import { once } from "node:events";
 import { basename, resolve, dirname } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
 
+// Source identity is controlled without reading the host's environment or foreground app.
+for (const key of [
+  "INSOMNIAC_SOURCE_APP",
+  "__CFBundleIdentifier",
+  "SSH_CONNECTION",
+  "SSH_CLIENT",
+  "SSH_TTY",
+  "TMUX",
+  "STY",
+]) {
+  delete process.env[key];
+}
+
+process.env.TERM_PROGRAM = "ghostty";
+
 // Real discovery sees only controlled files; every possible notifier is intercepted below.
 const helperPath = resolve(
   process.env.PI_CODING_AGENT_DIR,
@@ -183,6 +198,7 @@ try {
     cost: { input: 0.123, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.123 },
   });
   assert.match(render(), /~\$0\.123/u);
+  process.env.TERM_PROGRAM = "Apple_Terminal";
   await runner.emit({ type: "agent_start" });
   assert.equal(children.length, 1);
   await once(children[0], "spawn");
@@ -216,7 +232,14 @@ try {
     expectedCommand === "/usr/bin/osascript" ? desktopRequests[0].args.slice(4) : desktopRequests[0].args,
     expectedCommand === "/usr/bin/osascript"
       ? ["--", "Pi run ended", `${basename(process.cwd())} · Demo review`]
-      : ["-title", "\\Pi run ended", "-message", `\\${basename(process.cwd())} · Demo review`],
+      : [
+          "-title",
+          "\\Pi run ended",
+          "-message",
+          `\\${basename(process.cwd())} · Demo review`,
+          "-activate",
+          "com.mitchellh.ghostty",
+        ],
   );
   assert.equal(notifications.filter(({ type }) => type === "warning").length, 0);
   await runner.emit({ type: "agent_start" });

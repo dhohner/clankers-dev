@@ -3,8 +3,10 @@ import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { basename, join } from "node:path";
 import { createDesktopDelivery, type NotificationExecutor } from "./desktop-notification.ts";
 import { NotificationPreference, type PreferenceFileSystem } from "./notification-preference.ts";
+import { resolveSourceApp, type SourceApp } from "./notification-source.ts";
 
 interface NotificationSession {
+  source: SourceApp;
   enabled: boolean;
   store: NotificationPreference;
   tail: Promise<void>;
@@ -15,9 +17,11 @@ interface NotificationSession {
 export interface DesktopNotice {
   title: string;
   body: string;
+  activationTarget?: string;
 }
 
 export interface NotificationDependencies {
+  environment?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   now?: () => number;
   discover?: () => Promise<string | undefined>;
@@ -41,6 +45,7 @@ export function installNotifications(
   let current: NotificationSession | undefined;
   pi.on("session_start", async (_event, ctx) => {
     const session: NotificationSession = {
+      source: resolveSourceApp(dependencies.environment ?? process.env),
       enabled: true,
       store: new NotificationPreference(join(getAgentDir(), "insomniac-notifications.json"), filesystem),
       tail: Promise.resolve(),
@@ -93,7 +98,9 @@ export function installNotifications(
       return label ? [label] : [];
     });
 
-    const notice = { title: "Pi run ended", body: labels.join(" · ") };
+    const notice: DesktopNotice = { title: "Pi run ended", body: labels.join(" · ") };
+
+    if (session.source.bundleIdentifier) notice.activationTarget = session.source.bundleIdentifier;
     setImmediate(() => {
       void Promise.resolve()
         .then(() => {

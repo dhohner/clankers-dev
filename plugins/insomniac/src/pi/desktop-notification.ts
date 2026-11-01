@@ -81,6 +81,8 @@ export function createDesktopDelivery(
       ? ["-title", `\\${notice.title}`, "-message", `\\${notice.body}`]
       : ["-l", "JavaScript", "-e", script, "--", notice.title, notice.body];
 
+    if (file && notice.activationTarget) args.push("-activate", notice.activationTarget);
+
     await execute(file ?? "/usr/bin/osascript", args, {
       timeout: 10_000,
       maxBuffer: 16_384,

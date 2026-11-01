@@ -123,12 +123,16 @@ it.skipIf(process.platform !== "darwin")(
         "\\path with spaces",
         "雪\n'\"; $(touch /tmp/never)",
       ]) {
-        await deliver({ title: "Pi run ended", body });
-        // SAFETY: The awaited delivery records an execute call before resolving.
-        const [, args] = execute.mock.calls.at(-1)!;
-        const result = spawnSync(executable, args, { encoding: "utf8", timeout: 10_000 });
-        expect(result.status, result.stderr).toBe(0);
-        expect(JSON.parse(result.stdout)).toEqual(["Pi run ended", body]);
+        for (const activationTarget of [undefined, "com.apple.Terminal", "App", "123", "org.example.-App"]) {
+          await deliver({ title: "Pi run ended", body, activationTarget });
+          // SAFETY: The awaited delivery records an execute call before resolving.
+          const [, args] = execute.mock.calls.at(-1)!;
+          const result = spawnSync(executable, args, { encoding: "utf8", timeout: 10_000 });
+          expect(result.status, result.stderr).toBe(0);
+          expect(JSON.parse(result.stdout)).toEqual(
+            activationTarget ? ["Pi run ended", body, activationTarget] : ["Pi run ended", body],
+          );
+        }
       }
     } finally {
       rmSync(directory, { recursive: true, force: true });

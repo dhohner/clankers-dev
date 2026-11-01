@@ -64,7 +64,8 @@ brew install terminal-notifier
 Installation is optional.
 Insomniac never downloads, installs, or modifies apps, resets permissions, or changes settings automatically.
 It requests no sound and applies no foreground app gate.
-No custom click action is configured; return to the terminal manually to inspect the result.
+With either native notifier, clicking a notice requests activation of the originating app when its bundle identifier is known.
+For fallback notices and notices without a target, return to the terminal manually to inspect the result.
 macOS controls permission, presentation, click behavior, and dismissal; Insomniac does not change those settings.
 A successful process exit confirms submission only.
 A submitted request does not guarantee visible presentation: permission settings, Focus, or other macOS suppression may hide it without reporting an error.
@@ -112,6 +113,68 @@ For an isolated check, launch Pi from a scratch directory with `PI_CODING_AGENT_
 Run status, disable, and enable using the commands above; restart against the same directory after each assignment to check persistence.
 Use synthetic folder and session names such as `demo-project` and `Demo review` when inspecting output.
 No personal configuration file needs to be opened.
+
+### Source app activation
+
+At each Pi extension session start, Insomniac snapshots the source app from the Pi process environment.
+It maps `TERM_PROGRAM=ghostty` to `com.mitchellh.ghostty`, `iTerm.app` to `com.googlecode.iterm2`, and `Apple_Terminal` to `com.apple.Terminal`.
+Other apps can supply their bundle identifier through `__CFBundleIdentifier` in the originating process environment.
+Unknown, malformed, or conflicting identity produces a notice without custom activation.
+Insomniac never reads the current foreground app.
+Later foreground changes, environment changes, deferred discovery, and other Pi sessions cannot retarget an accepted notice.
+A replacement extension session resolves its own target.
+
+The mappings follow [Ghostty's environment contract](https://github.com/ghostty-org/ghostty/blob/main/src/termio/Exec.zig), [iTerm2's environment contract](https://github.com/gnachman/iTerm2/blob/master/sources/PTYSession/PTYSession.m), and [iTerm2's bundle metadata](https://github.com/gnachman/iTerm2/blob/master/plists/release-iTerm2.plist).
+Ghostty and Terminal bundle identifiers and Terminal's `Apple_Terminal` identity were also checked against installed macOS apps.
+Inherited environment values are evidence, but cannot guarantee origin after forwarding or unusual shell setup.
+Insomniac omits automatic activation when SSH, tmux, or screen environment markers are present.
+Use an explicit override for multiplexers, remote shells, or an unknown source only when that app exists on the Mac submitting the notice.
+Remote app activation is unsupported.
+
+Set the override in the shell that launches Pi:
+
+```sh
+export INSOMNIAC_SOURCE_APP=com.mitchellh.ghostty
+printf '%s\n' "$INSOMNIAC_SOURCE_APP"
+pi
+```
+
+Replace the example with the intended app's bundle identifier.
+For an installed app, read its `CFBundleIdentifier` from its `Contents/Info.plist`, for example:
+
+```sh
+/usr/libexec/PlistBuddy -c 'Print CFBundleIdentifier' /Applications/Ghostty.app/Contents/Info.plist
+```
+
+The explicit value takes precedence over all automatic identity, including SSH and multiplexer markers.
+Values allow ASCII letters, digits, hyphens, and periods, following [Apple's bundle identifier character rules](https://developer.apple.com/documentation/bundleresources/information-property-list/cfbundleidentifier).
+Single components, numeric components, mixed case, and internal hyphens are accepted.
+Empty components, leading hyphens, whitespace, controls, non-ASCII characters, and shell syntax are rejected.
+A present invalid value, including an empty string, disables custom activation without suppressing the notice or selecting another app.
+The setting is separate from `/insomniac-notifications` and the persisted JSON boolean preference.
+
+Remove the override to restore automatic detection, then launch a new Pi process from that shell:
+
+```sh
+unset INSOMNIAC_SOURCE_APP
+printf '%s\n' "${INSOMNIAC_SOURCE_APP-unset}"
+pi
+```
+
+An existing process cannot inherit later changes from its parent shell.
+To verify the setting, use a scratch project, synthetic session labels, a temporary `PI_CODING_AGENT_DIR`, and an already installed native notifier with provider networking disabled.
+Confirm the printed value and the app's bundle identifier, run an eligible TUI session for at least 30 seconds, switch to another app, then click the notice and observe which app comes forward.
+Repeat after removing the override to check detection.
+Record the notifier version, source app, override value or absence, notification permission state, and observed activation.
+A successful submission or an argument test does not verify that macOS displayed the notice or activated an app.
+
+Both native notifiers use [`-activate BUNDLE_ID`](https://github.com/julienXX/terminal-notifier/blob/3.1.0/README.markdown#-activate-bundle_id).
+The bundle identifier is an inert argument; Insomniac never builds a shell click command or uses `-execute`.
+Activation brings the app forward and does not select a window, tab, project, or Pi session.
+Clicking never starts or repeats Pi work.
+The `osascript` fallback always keeps normal macOS click behavior, even with an override.
+Notification permissions belong to the selected sender, which may be the Pi helper, standard notifier, or fallback host.
+Check that sender's permission in macOS settings if a notice is missing; Insomniac does not change permissions, request accessibility access, or automate terminal contents.
 
 ### Footer output
 
