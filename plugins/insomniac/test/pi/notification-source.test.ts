@@ -220,22 +220,21 @@ async function sourceSession(environment: NodeJS.ProcessEnv, tool: string | null
   };
 }
 
-// Dropping source detection or either notifier's activation argument loses native click activation.
+// Dropping source detection or the activation argument loses native click activation.
 it.each([
   ["ghostty", undefined, "com.mitchellh.ghostty"],
   ["iTerm.app", undefined, "com.googlecode.iterm2"],
   ["Apple_Terminal", undefined, "com.apple.Terminal"],
   ["other", "org.example.Other-App", "org.example.Other-App"],
-])("activates %s from its originating identity with both notifiers", async (terminal, bundle, target) => {
-  for (const tool of ["/fake/Pi Notifier.app/terminal-notifier", "/fake/terminal-notifier"]) {
-    const host = await sourceSession({ TERM_PROGRAM: terminal, __CFBundleIdentifier: bundle }, tool);
-    await host.settle();
-    expect(host.execute.mock.calls).toEqual([
-      [
-        tool,
-        ["-title", "\\Pi run ended", "-message", "\\code · Review", "-activate", target],
-        { timeout: 10_000, maxBuffer: 16_384 },
-      ],
-    ]);
-  }
+])("activates %s from its originating identity", async (terminal, bundle, target) => {
+  const tool = "/fake/terminal-notifier";
+  const host = await sourceSession({ TERM_PROGRAM: terminal, __CFBundleIdentifier: bundle }, tool);
+  await host.settle();
+  expect(host.execute.mock.calls).toEqual([
+    [
+      tool,
+      ["-title", "\\Pi run ended", "-message", "\\code · Review", "-activate", target],
+      { timeout: 10_000, maxBuffer: 16_384 },
+    ],
+  ]);
 });

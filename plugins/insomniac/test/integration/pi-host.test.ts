@@ -17,7 +17,7 @@ afterEach(() => child?.kill("SIGKILL"));
 
 afterAll(() => fixture?.dispose());
 
-it.each(["helper", "standard", "none"])(
+it.each(["standard", "none"])(
   "loads Pi 1.4.0 with %s available and releases fake processes",
   async (tools) => {
     const script = new URL("../fixtures/pi-integration.mjs", import.meta.url);

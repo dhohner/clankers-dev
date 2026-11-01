@@ -24,22 +24,13 @@ for (const key of [
 process.env.TERM_PROGRAM = "ghostty";
 
 // Real discovery sees only controlled files; every possible notifier is intercepted below.
-const helperPath = resolve(
-  process.env.PI_CODING_AGENT_DIR,
-  "notifications/Pi Notifier.app/Contents/MacOS/terminal-notifier",
-);
-
 const toolsDirectory = resolve(process.env.PI_CODING_AGENT_DIR, "tools with spaces");
 
 const standardPath = resolve(toolsDirectory, "terminal-notifier");
 
 process.env.PATH = toolsDirectory;
 
-for (const file of process.env.INSOMNIAC_TEST_TOOLS === "helper"
-  ? [helperPath, standardPath]
-  : process.env.INSOMNIAC_TEST_TOOLS === "standard"
-    ? [standardPath]
-    : []) {
+for (const file of process.env.INSOMNIAC_TEST_TOOLS === "standard" ? [standardPath] : []) {
   await mkdir(dirname(file), { recursive: true });
   await writeFile(file, "#!/bin/sh\nexit 99\n", { mode: 0o700 });
 }
@@ -55,8 +46,7 @@ let elapsed = 0;
 Object.defineProperty(performance, "now", { value: () => elapsed });
 
 childProcess.execFile = (command, args, options, callback) => {
-  if (!["/usr/bin/osascript", helperPath, standardPath].includes(command))
-    return realExecFile(command, args, options, callback);
+  if (!["/usr/bin/osascript", standardPath].includes(command)) return realExecFile(command, args, options, callback);
   desktopRequests.push({ command, args, options });
 
   return realExecFile(process.execPath, ["-e", ""], options, callback);
@@ -220,12 +210,7 @@ try {
 
   assert.equal(desktopRequests.length, 1, "qualified settlement submits one request");
 
-  const expectedCommand =
-    process.env.INSOMNIAC_TEST_TOOLS === "helper"
-      ? helperPath
-      : process.env.INSOMNIAC_TEST_TOOLS === "standard"
-        ? standardPath
-        : "/usr/bin/osascript";
+  const expectedCommand = process.env.INSOMNIAC_TEST_TOOLS === "standard" ? standardPath : "/usr/bin/osascript";
 
   assert.equal(desktopRequests[0].command, expectedCommand);
   assert.deepEqual(

@@ -21,20 +21,15 @@ it("submits through the discovered executable with inert native arguments", asyn
   ]);
 });
 
-// Reversing the candidates loses helper priority; missing tools must remain normal.
 it.each([
-  [
-    ["/agent/Pi Notifier.app/Contents/MacOS/terminal-notifier", "/tools with spaces/terminal-notifier"],
-    "/agent/Pi Notifier.app/Contents/MacOS/terminal-notifier",
-  ],
-  [["/tools with spaces/terminal-notifier"], "/tools with spaces/terminal-notifier"],
+  [["/tools with spaces/terminal-notifier", "/second/terminal-notifier"], "/tools with spaces/terminal-notifier"],
+  [["/second/terminal-notifier"], "/second/terminal-notifier"],
   [[], undefined],
 ] as const)("selects the first installed tool from %j", async (installed, expected) => {
   const isExecutable = vi.fn(async (file: string) => installed.some((path) => path === file));
 
   const discover = createNotifierDiscovery({
-    helperPath: "/agent/Pi Notifier.app/Contents/MacOS/terminal-notifier",
-    searchPath: "relative::/tools with spaces",
+    searchPath: "relative::/tools with spaces:/second",
     isExecutable,
   });
 
@@ -47,19 +42,17 @@ it.each([
 // Existence alone would select a directory or an inaccessible file instead of the fallback.
 it("requires executable files during filesystem discovery", async () => {
   const directory = mkdtempSync(join(tmpdir(), "insomniac-discovery-"));
-  const helper = join(directory, "helper.app");
   const standard = join(directory, "terminal-notifier");
 
   try {
-    mkdirSync(helper);
+    mkdirSync(standard);
+    const discover = createNotifierDiscovery({ searchPath: directory });
+    expect(await discover()).toBeUndefined();
+    rmSync(standard, { recursive: true });
     writeFileSync(standard, "", { mode: 0o600 });
-    const discover = createNotifierDiscovery({ helperPath: helper, searchPath: directory });
     expect(await discover()).toBeUndefined();
     chmodSync(standard, 0o700);
     expect(await discover()).toBe(standard);
-    rmSync(helper, { recursive: true });
-    writeFileSync(helper, "", { mode: 0o700 });
-    expect(await discover()).toBe(helper);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
