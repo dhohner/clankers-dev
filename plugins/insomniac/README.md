@@ -34,14 +34,44 @@ Control characters are removed or rendered as spaces.
 The notice describes settlement and makes no claim that the task succeeded.
 It excludes full paths, prompts, responses, tool output, and error details.
 
-Insomniac uses macOS `osascript` to request a standard notification, with no sound request, custom click action, or terminal focus check.
-Return to the terminal manually to inspect the result.
+Insomniac discovers an executable for each qualifying run, in this order:
+
+1. The optional Pi helper at `<agent-dir>/notifications/Pi Notifier.app/Contents/MacOS/terminal-notifier`.
+   `<agent-dir>` comes from `getAgentDir()` and respects `PI_CODING_AGENT_DIR`.
+   This is the location contract for a separately supplied helper app; this plugin does not supply or build that bundle.
+2. Standard `terminal-notifier` in the first absolute `PATH` directory containing an executable file of that name.
+   Empty and relative `PATH` entries are ignored.
+   Standard `terminal-notifier` uses its own app icon.
+3. macOS `/usr/bin/osascript`, which requires no optional installation.
+   This fallback lacks Pi’s logo and custom activation.
+
+Discovery checks executable files without posting a probe notification and has a one second deadline.
+Submission has a ten second process timeout and a 16 KiB output limit.
+A missing optional tool is normal: successful fallback submission produces no warning.
+A selected tool that fails, times out, or disappears does not trigger another transport attempt for that run.
+The next qualifying run discovers tools again.
+Both native notifiers use the `terminal-notifier` argument contract: `-title` and `-message`, with each display value prefixed by one backslash that the notifier removes after parsing.
+This keeps option syntax, property list syntax, quotes, and leading backslashes inert.
+The fallback passes labels as arguments to a fixed script.
+Version 3 of `terminal-notifier` does not support an `-appIcon` override; a Pi icon requires a separate helper app bundle.
+
+To install the standard notifier explicitly, you can run:
+
+```sh
+brew install terminal-notifier
+```
+
+Installation is optional.
+Insomniac never downloads, installs, or modifies apps, resets permissions, or changes settings automatically.
+It requests no sound and applies no foreground app gate.
+No custom click action is configured; return to the terminal manually to inspect the result.
 macOS controls permission, presentation, click behavior, and dismissal; Insomniac does not change those settings.
+A successful process exit confirms submission only.
 A submitted request does not guarantee visible presentation: permission settings, Focus, or other macOS suppression may hide it without reporting an error.
 Detectable submission failures produce at most one terminal warning per session, with no automatic retry for that run.
 Later qualifying runs can attempt submission again.
-Sleep protection releases at settlement without waiting for delivery.
-Reload and session replacement discard pending application dispatch; accepted requests belong to macOS and cannot be retracted by Insomniac.
+Sleep protection releases at settlement without waiting for discovery or delivery.
+Reload, shutdown, and session replacement discard pending application dispatch; accepted requests belong to macOS and cannot be retracted by Insomniac.
 Delivery history remains in memory and is never replayed after restart.
 
 Use these commands in Pi:

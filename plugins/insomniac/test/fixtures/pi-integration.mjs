@@ -5,7 +5,29 @@ import childProcess from "node:child_process";
 import { promisify } from "node:util";
 import { syncBuiltinESMExports } from "node:module";
 import { once } from "node:events";
-import { basename, resolve } from "node:path";
+import { basename, resolve, dirname } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+
+// Real discovery sees only controlled files; every possible notifier is intercepted below.
+const helperPath = resolve(
+  process.env.PI_CODING_AGENT_DIR,
+  "notifications/Pi Notifier.app/Contents/MacOS/terminal-notifier",
+);
+
+const toolsDirectory = resolve(process.env.PI_CODING_AGENT_DIR, "tools with spaces");
+
+const standardPath = resolve(toolsDirectory, "terminal-notifier");
+
+process.env.PATH = toolsDirectory;
+
+for (const file of process.env.INSOMNIAC_TEST_TOOLS === "helper"
+  ? [helperPath, standardPath]
+  : process.env.INSOMNIAC_TEST_TOOLS === "standard"
+    ? [standardPath]
+    : []) {
+  await mkdir(dirname(file), { recursive: true });
+  await writeFile(file, "#!/bin/sh\nexit 99\n", { mode: 0o700 });
+}
 
 const realSpawn = childProcess.spawn;
 
@@ -18,7 +40,8 @@ let elapsed = 0;
 Object.defineProperty(performance, "now", { value: () => elapsed });
 
 childProcess.execFile = (command, args, options, callback) => {
-  if (command !== "/usr/bin/osascript") return realExecFile(command, args, options, callback);
+  if (!["/usr/bin/osascript", helperPath, standardPath].includes(command))
+    return realExecFile(command, args, options, callback);
   desktopRequests.push({ command, args, options });
 
   return realExecFile(process.execPath, ["-e", ""], options, callback);
@@ -174,13 +197,28 @@ try {
   await runner.emit({ type: "agent_settled", aborted: false });
   assert.match(render(), /can sleep/u);
   await gone(children[0]);
-  await new Promise(setImmediate);
+
+  for (let attempt = 0; attempt < 100 && desktopRequests.length === 0; attempt++) {
+    await new Promise((complete) => setTimeout(complete, 5));
+  }
+
   assert.equal(desktopRequests.length, 1, "qualified settlement submits one request");
-  assert.deepEqual(desktopRequests[0].args.slice(4), [
-    "--",
-    "Pi run ended",
-    `${basename(process.cwd())} · Demo review`,
-  ]);
+
+  const expectedCommand =
+    process.env.INSOMNIAC_TEST_TOOLS === "helper"
+      ? helperPath
+      : process.env.INSOMNIAC_TEST_TOOLS === "standard"
+        ? standardPath
+        : "/usr/bin/osascript";
+
+  assert.equal(desktopRequests[0].command, expectedCommand);
+  assert.deepEqual(
+    expectedCommand === "/usr/bin/osascript" ? desktopRequests[0].args.slice(4) : desktopRequests[0].args,
+    expectedCommand === "/usr/bin/osascript"
+      ? ["--", "Pi run ended", `${basename(process.cwd())} · Demo review`]
+      : ["-title", "\\Pi run ended", "-message", `\\${basename(process.cwd())} · Demo review`],
+  );
+  assert.equal(notifications.filter(({ type }) => type === "warning").length, 0);
   await runner.emit({ type: "agent_start" });
   await once(children[1], "spawn");
   await runner.emit({ type: "session_shutdown", reason: "reload" });

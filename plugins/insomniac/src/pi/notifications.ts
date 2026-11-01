@@ -1,7 +1,7 @@
 import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { basename, join } from "node:path";
-import { createDesktopDelivery } from "./desktop-notification.ts";
+import { createDesktopDelivery, type NotificationExecutor } from "./desktop-notification.ts";
 import { NotificationPreference, type PreferenceFileSystem } from "./notification-preference.ts";
 
 interface NotificationSession {
@@ -20,6 +20,8 @@ export interface DesktopNotice {
 export interface NotificationDependencies {
   platform?: NodeJS.Platform;
   now?: () => number;
+  discover?: () => Promise<string | undefined>;
+  execute?: NotificationExecutor;
   deliver?: (notice: DesktopNotice) => Promise<void>;
 }
 
@@ -35,7 +37,7 @@ export function installNotifications(
   dependencies: NotificationDependencies = {},
 ): void {
   const now = dependencies.now ?? (() => performance.now());
-  const deliver = dependencies.deliver ?? createDesktopDelivery();
+  const deliver = createDesktopDelivery(dependencies.execute, dependencies.discover);
   let current: NotificationSession | undefined;
   pi.on("session_start", async (_event, ctx) => {
     const session: NotificationSession = {
@@ -95,9 +97,9 @@ export function installNotifications(
     setImmediate(() => {
       void Promise.resolve()
         .then(() => {
-          if (current === session) return deliver(notice);
+          if (current !== session) return;
 
-          return undefined;
+          return dependencies.deliver ? dependencies.deliver(notice) : deliver(notice, () => current === session);
         })
         .catch(() => {
           if (current !== session || session.warned) return;

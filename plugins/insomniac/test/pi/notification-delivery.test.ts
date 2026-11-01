@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import * as filesystem from "node:fs/promises";
 import { expect, it, vi } from "vitest";
+import type { NotificationExecutor } from "../../src/pi/desktop-notification.ts";
 import { installNotifications } from "../../src/pi/notifications.ts";
 import { installInsomniac } from "../../index.ts";
 import { createAssertionProcess } from "../support/assertion-process.ts";
@@ -235,6 +236,165 @@ it("releases sleep protection before dispatch and keeps working while delivery i
   expect(host.render()).toContain("☕ awake");
   expect(assertion.children[1].kill).not.toHaveBeenCalled();
   host.emit("session_shutdown");
+});
+
+// A discovery finishing after invalidation must never submit into the next session.
+it.each(["replace", "shutdown", "reload"])("discards delayed discovery on %s after releasing sleep", async (action) => {
+  const host = createPiHost();
+  const assertion = createAssertionProcess();
+  let now = 0;
+  let complete!: (file: string) => void;
+
+  const discover = vi.fn(
+    () =>
+      new Promise<string>((resolve) => {
+        complete = resolve;
+      }),
+  );
+
+  const execute = vi.fn().mockResolvedValue(undefined);
+  installInsomniac(host.pi, { platform: "darwin", spawn: assertion.spawn }, { now: () => now, discover, execute });
+  await Promise.all(host.emit("session_start"));
+  host.emit("agent_start");
+  assertion.children[0].emit("spawn");
+  now = 30_000;
+  await Promise.all(host.emit("agent_settled", false));
+  expect(assertion.children[0].kill).toHaveBeenCalledOnce();
+  expect(host.render()).toContain("💤 can sleep");
+  expect(discover).not.toHaveBeenCalled();
+  await flush();
+  expect(discover).toHaveBeenCalledOnce();
+
+  if (action !== "replace") host.emit("session_shutdown");
+
+  if (action !== "shutdown") await Promise.all(host.emit("session_start"));
+  complete("/fake tools/helper");
+  await flush();
+  expect(execute).not.toHaveBeenCalled();
+  expect(host.notify).not.toHaveBeenCalled();
+  host.emit("session_shutdown");
+});
+
+// Discovery failures must use the session warning limiter and must not create a delivery process.
+it.each(["throw", "reject"])("contains discovery %s and permits later independent attempts", async (failure) => {
+  const host = createPiHost();
+  let now = 0;
+
+  const discover = vi.fn(() => {
+    const error = new Error("discovery failed");
+
+    if (failure === "throw") throw error;
+
+    return Promise.reject(error);
+  });
+
+  const execute = vi.fn().mockResolvedValue(undefined);
+  installNotifications(host.pi, undefined, { platform: "darwin", now: () => now, discover, execute });
+  await Promise.all(host.emit("session_start"));
+
+  for (const elapsed of [30_000, 60_000]) {
+    host.emit("agent_start");
+    now = elapsed;
+    host.emit("agent_settled", false);
+    await flush();
+  }
+
+  expect(discover).toHaveBeenCalledTimes(2);
+  expect(execute).not.toHaveBeenCalled();
+  expect(host.notify.mock.calls).toEqual([["Could not submit Insomniac notification.", "warning"]]);
+});
+
+// Late rejection from discovery or native delivery must not warn or consume the next session's warning.
+it.each(["discovery", "delivery"])(
+  "discards late %s failures and keeps replacement warnings independent",
+  async (phase) => {
+    const host = createPiHost();
+    let now = 0;
+    let reject!: (error: Error) => void;
+
+    const pending = () =>
+      new Promise<never>((_resolve, fail) => {
+        reject = fail;
+      });
+
+    const discover = vi.fn<() => Promise<string | undefined>>().mockResolvedValue("/fake/helper");
+    const execute = vi.fn<NotificationExecutor>().mockResolvedValue(undefined);
+
+    if (phase === "discovery") discover.mockImplementationOnce(pending);
+    else execute.mockImplementationOnce(pending);
+    installNotifications(host.pi, undefined, { platform: "darwin", now: () => now, discover, execute });
+    await Promise.all(host.emit("session_start"));
+    host.emit("agent_start");
+    now = 30_000;
+    host.emit("agent_settled", false);
+    await flush();
+    host.emit("session_shutdown");
+    await Promise.all(host.emit("session_start"));
+    reject(new Error("old failure"));
+    await flush();
+    expect(host.notify).not.toHaveBeenCalled();
+    execute.mockRejectedValue(new Error("new failure"));
+    host.emit("agent_start");
+    now = 60_000;
+    host.emit("agent_settled", false);
+    await flush();
+    expect(host.notify.mock.calls).toEqual([["Could not submit Insomniac notification.", "warning"]]);
+  },
+);
+
+// Retrying a failed selected transport can duplicate an already accepted OS request.
+it.each(["ENOENT", "rejection", "throw", "timeout"])(
+  "contains selected transport %s without fallback and retries only later runs",
+  async (failure) => {
+    const host = createPiHost();
+    let now = 0;
+    const discover = vi.fn().mockResolvedValue("/fake tools/helper");
+
+    const execute = vi.fn<NotificationExecutor>(() => {
+      const error = new Error(failure);
+
+      if (failure === "throw") throw error;
+
+      return Promise.reject(error);
+    });
+
+    installNotifications(host.pi, undefined, { platform: "darwin", now: () => now, discover, execute });
+    await Promise.all(host.emit("session_start"));
+
+    for (const elapsed of [30_000, 60_000]) {
+      host.emit("agent_start");
+      now = elapsed;
+      host.emit("agent_settled", false);
+      host.emit("agent_settled", false);
+      await flush();
+    }
+
+    expect(execute.mock.calls.map(([file]) => file)).toEqual(["/fake tools/helper", "/fake tools/helper"]);
+    expect(discover).toHaveBeenCalledTimes(2);
+    expect(host.notify.mock.calls).toEqual([["Could not submit Insomniac notification.", "warning"]]);
+  },
+);
+
+// Checking only the injected legacy delivery seam can hide accidental discovery in unsupported hosts.
+it.each([
+  ["linux", "tui"],
+  ["win32", "tui"],
+  ["darwin", "print"],
+  ["darwin", "json"],
+  ["darwin", "rpc"],
+] as const)("does not discover tools on %s in %s", async (platform, mode) => {
+  const host = createPiHost(mode);
+  let now = 0;
+  const discover = vi.fn().mockResolvedValue(undefined);
+  const execute = vi.fn().mockResolvedValue(undefined);
+  installNotifications(host.pi, undefined, { platform, now: () => now, discover, execute });
+  await Promise.all(host.emit("session_start"));
+  host.emit("agent_start");
+  now = 30_000;
+  host.emit("agent_settled", false);
+  await flush();
+  expect(discover).not.toHaveBeenCalled();
+  expect(execute).not.toHaveBeenCalled();
 });
 
 // A failed save must not publish an unsaved assignment into qualification.
