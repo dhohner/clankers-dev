@@ -122,17 +122,19 @@ class MessageTests(unittest.TestCase):
             f"Source: {self.base[:7]}..{revision[:7]}\n",
         )
 
-    def test_first_release_requires_an_explicit_starting_revision(self) -> None:
+    def test_requires_a_committed_source_revision(self) -> None:
         self.git(self.distribution, "rm", "SOURCE_REVISION")
         self.record_release(None)
         revision = self.commit("feat: first published feature")
-        missing = self.generate(revision)
-        self.assertNotEqual(missing.returncode, 0)
-        self.assertIn("--initial-base", missing.stderr)
-        result = self.generate(revision, "--initial-base", self.base)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("feat: first published feature", result.stdout)
-        self.assertNotIn("chore: initial source", result.stdout)
+        result = self.generate(revision)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("committed SOURCE_REVISION", result.stderr)
+        self.assertEqual(result.stdout, "")
+
+    def test_rejects_removed_initial_base_option(self) -> None:
+        result = self.generate(self.base, "--initial-base", self.base)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("unrecognized arguments", result.stderr)
 
     def test_rejects_invalid_or_unrelated_release_boundaries(self) -> None:
         revision = self.commit("feat: next")

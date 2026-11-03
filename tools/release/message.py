@@ -15,17 +15,12 @@ def git(repository: Path, *args: str) -> str:
     ).stdout.strip()
 
 
-def release_message(
-    source: Path, distribution: Path, revision: str, initial_base: str
-) -> str:
-    if git(distribution, "ls-tree", "--name-only", "HEAD", "--", "SOURCE_REVISION"):
-        previous = git(distribution, "show", "HEAD:SOURCE_REVISION")
-    elif initial_base:
-        previous = initial_base
-    else:
-        raise ValueError(
-            "First release requires --initial-base with a source commit SHA."
-        )
+def release_revisions(
+    source: Path, distribution: Path, revision: str
+) -> tuple[str, str]:
+    if not git(distribution, "ls-tree", "--name-only", "HEAD", "--", "SOURCE_REVISION"):
+        raise ValueError("Distribution requires a committed SOURCE_REVISION.")
+    previous = git(distribution, "show", "HEAD:SOURCE_REVISION")
     for label, value in (
         ("Previous revision", previous),
         ("Source revision", revision),
@@ -34,16 +29,21 @@ def release_message(
             raise ValueError(f"{label} must be a full source commit SHA: {value!r}")
         git(source, "cat-file", "-e", f"{value}^{{commit}}")
     ancestor = git(source, "merge-base", previous, revision)
+    if ancestor not in (previous, revision):
+        raise ValueError(f"Release revisions are not ancestors: {previous}, {revision}")
+    return previous, ancestor
+
+
+def release_message(source: Path, distribution: Path, revision: str) -> str:
+    previous, ancestor = release_revisions(source, distribution, revision)
     sections = [f"release: clankers {revision[:7]}"]
     if ancestor == previous:
         commit_range = f"{previous}..{revision}"
-    elif ancestor == revision:
+    else:
         commit_range = f"{revision}..{previous}"
         sections.extend(
             [f"Rollback from {previous[:7]} to {revision[:7]}.", "Removed changes:"]
         )
-    else:
-        raise ValueError(f"Release revisions are not ancestors: {previous}, {revision}")
     messages = git(source, "log", "--reverse", "-z", "--format=%B", commit_range)
     changes = []
     for message in messages.split("\0"):
@@ -73,12 +73,9 @@ def main() -> None:
     parser.add_argument("--source", type=Path, required=True)
     parser.add_argument("--distribution", type=Path, required=True)
     parser.add_argument("--revision", required=True)
-    parser.add_argument("--initial-base", default="")
     args = parser.parse_args()
     try:
-        message = release_message(
-            args.source, args.distribution, args.revision, args.initial_base
-        )
+        message = release_message(args.source, args.distribution, args.revision)
     except (ValueError, subprocess.CalledProcessError) as error:
         parser.exit(1, f"Could not generate release message: {error}\n")
     print(message, end="")

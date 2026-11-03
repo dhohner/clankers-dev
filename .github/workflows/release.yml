@@ -1,16 +1,12 @@
 name: Release distribution
 
-on:
+# Automatic publication accepts only successful push runs on main from this repository and uses their tested SHA.
+on: # zizmor: ignore[dangerous-triggers]
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      initial_base:
-        description: "Full source commit SHA before the first release's changes (only needed without SOURCE_REVISION)"
-        required: false
-        type: string
-
-concurrency:
-  group: release-clankers
-  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -18,17 +14,31 @@ permissions:
 
 jobs:
   publish:
-    if: github.repository == 'dhohner/clankers-dev' && github.ref == 'refs/heads/main'
+    if: >-
+      github.repository == 'dhohner/clankers-dev' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'main' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     environment: distribution
+    concurrency:
+      group: release-clankers
+      cancel-in-progress: false
+      # Older CI completions must not displace pending releases for newer commits.
+      queue: max
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           path: source
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
-      - name: Require successful source CI
+      - name: Require successful source CI for a manual run
+        if: github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ github.token }}
           SOURCE_REPOSITORY: ${{ github.repository }}
@@ -45,14 +55,6 @@ jobs:
         with:
           version: "0.13.0"
           enable-cache: false
-      - name: Test the distribution builder
-        working-directory: source
-        run: uv run --no-project --isolated --python 3.14 python -m unittest discover -s tools/release/tests -v
-      - name: Build runtime distribution
-        working-directory: source
-        run: |
-          uv run --no-project --isolated --python 3.14 python tools/release/build.py \
-            --output "$RUNNER_TEMP/clankers-distribution"
       - name: Check out distribution repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -61,21 +63,19 @@ jobs:
           token: ${{ secrets.DIST_TOKEN }}
           persist-credentials: false
           path: distribution
-      - name: Generate release commit message
+      - name: Prepare distribution
+        id: prepare
         env:
-          SOURCE_REVISION: ${{ github.sha }}
-          INITIAL_BASE: ${{ inputs.initial_base }}
+          SOURCE_REVISION: ${{ github.event.workflow_run.head_sha || github.sha }}
         run: |
-          uv run --no-project --isolated --python 3.14 python source/tools/release/message.py \
+          uv run --no-project --isolated --python 3.14 python source/tools/release/prepare.py \
             --source "$GITHUB_WORKSPACE/source" \
             --distribution "$GITHUB_WORKSPACE/distribution" \
             --revision "$SOURCE_REVISION" \
-            --initial-base "$INITIAL_BASE" > "$RUNNER_TEMP/clankers-release-message"
-      - name: Replace tracked distribution contents
-        run: |
-          bash source/tools/release/replace.sh \
-            "$RUNNER_TEMP/clankers-distribution" "$GITHUB_WORKSPACE/distribution"
+            --output "$RUNNER_TEMP/clankers-distribution" \
+            --message "$RUNNER_TEMP/clankers-release-message"
       - name: Sign distribution commit
+        if: steps.prepare.outputs.publish == 'true'
         env:
           RELEASE_GPG_PRIVATE_KEY: ${{ secrets.RELEASE_GPG_PRIVATE_KEY }}
           RELEASE_GPG_PASSPHRASE: ${{ secrets.RELEASE_GPG_PASSPHRASE }}
@@ -85,6 +85,8 @@ jobs:
           bash source/tools/release/sign.sh \
             "$GITHUB_WORKSPACE/distribution" "$RUNNER_TEMP/clankers-release-message"
       - name: Publish distribution
+        id: publish
+        if: steps.prepare.outputs.publish == 'true'
         working-directory: distribution
         env:
           DIST_TOKEN: ${{ secrets.DIST_TOKEN }}
@@ -94,3 +96,17 @@ jobs:
           git -c credential.helper= \
             -c 'credential.helper=!f() { echo username=x-access-token; echo password="$DIST_TOKEN"; }; f' \
             push origin HEAD:main
+      - name: Summarize publication
+        if: always()
+        env:
+          PREPARE_OUTCOME: ${{ steps.prepare.outcome }}
+          SHOULD_PUBLISH: ${{ steps.prepare.outputs.publish }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+        run: |
+          if [ "$PUBLISH_OUTCOME" = success ]; then
+            commit=$(git -C distribution rev-parse HEAD)
+            printf '\nPublished: [%s](https://github.com/dhohner/clankers/commit/%s)\n' \
+              "$commit" "$commit" >> "$GITHUB_STEP_SUMMARY"
+          elif [ "$PREPARE_OUTCOME" != success ] || [ "$SHOULD_PUBLISH" = true ]; then
+            printf '\nPublication failed or was cancelled; see the job logs.\n' >> "$GITHUB_STEP_SUMMARY"
+          fi

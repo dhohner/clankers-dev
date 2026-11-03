@@ -7,7 +7,8 @@ The checkout directory can keep its existing name.
 ## Configure GitHub once
 
 1. In `clankers-dev`, create an Actions environment named `distribution`.
-   Restrict deployment branches to `main` and configure a required reviewer if your GitHub plan supports it.
+   Restrict deployment branches to `main`.
+   Remove required reviewers, wait timers, and any protection rules that require approval so publication can run automatically.
 2. Create a fine-grained personal access token owned by the person publishing releases.
    Select only `dhohner/clankers` and grant repository **Contents: read and write** and **Workflows: read and write**.
    Workflow permission is required because the first release deletes existing workflow files from the distribution repository.
@@ -57,16 +58,25 @@ The release workflow checks out the selected commit, so published content comes 
 1. Review and commit development changes, then push them to `main` in `clankers-dev`.
 2. Wait for the **CI** workflow's push run for that exact commit to pass.
    Its required `ci-ok` job includes the distribution tests.
-3. In `clankers-dev`, open **Actions → Release distribution → Run workflow**, selecting `main`.
-   If the distribution has no committed `SOURCE_REVISION` yet, set `initial_base` to the full source commit SHA immediately before the changes you want included in the first release.
-   That commit is excluded from the changelog.
-   Later releases read their starting revision from the distribution's committed `SOURCE_REVISION` and ignore this input.
-4. Approve the `distribution` environment deployment if approval is configured.
-5. Check the resulting commit on `dhohner/clankers` and its `SOURCE_REVISION` file.
+   **Release distribution** starts automatically when CI succeeds.
+3. Check the release run's summary for the source range, runtime file counts, publication result, and distribution commit link or skip reason.
+   Check the resulting commit on `dhohner/clankers` and its `SOURCE_REVISION` file when a release is published.
 
 The release workflow accepts only `dhohner/clankers-dev` on `main`.
-It checks for a successful CI push run for the selected SHA, repeats the distribution tests, and builds the runtime file set.
-It then removes all tracked files in a fresh distribution checkout and copies the generated files into it.
+Automatic runs require a successful CI push run on `main` from this repository.
+Pull request runs, forks, failed CI, and other branches cannot publish.
+The source checkout uses the triggering CI run's `head_sha`, which can differ from the current tip of `main`.
+CI already tests that commit, so publication builds the runtime file set without repeating the distribution suite.
+For a manual retry, open **Actions → Release distribution → Run workflow**, selecting `main`.
+Manual runs require a successful CI push run for their selected commit and accept no inputs.
+
+The distribution must already have a committed, valid `SOURCE_REVISION` identifying a commit in the source history.
+A missing marker stops publication; the workflow no longer accepts an initial base SHA.
+The workflow reads this marker before replacing files.
+An already published revision or an ancestor of the published revision is skipped before building, so CI runs that finish out of order cannot roll back a release.
+Divergent or unrelated histories stop publication.
+
+For a newer source revision, the workflow removes all tracked files in a fresh distribution checkout and copies the generated files into it.
 This removes old tests, evaluation cases, development tooling, and every `.github` file, including the old test workflow and Dependabot configuration.
 The distribution contains no Actions workflows, including the release workflow itself.
 
@@ -77,17 +87,24 @@ A final `Source: <previous short hash>..<current short hash>` line records the r
 Both hashes use seven characters.
 Source `Signed-off-by` lines are removed; dependency updates with `build(deps):` or `build(deps-dev):` subjects retain only their subjects.
 The release commit receives its own signing trailer.
-The workflow fetches the full source history and reads the previous revision from the distribution's committed `SOURCE_REVISION` before replacing files.
-Missing or invalid source revisions and histories that have diverged stop publication.
-Publishing an ancestor of the previous revision records a rollback with both revisions and the removed changes.
+The workflow fetches the full source history.
+Missing or invalid source revisions stop publication.
+Rollbacks require a new source commit that reverts the unwanted changes.
 The signing step imports the private subkey into a temporary keyring and supplies its passphrase through a private file descriptor.
 It forces the configured signing subkey, verifies the commit signature locally, then stops its GPG agent and deletes the temporary keyring and passphrase file.
 An import or signing failure stops publication.
 The signing secrets are available only to the signing step; the publishing step receives only `DIST_TOKEN`.
 GitHub should display **Verified** when the public key and signing email are registered on the account.
 It creates no tags or GitHub Releases.
-Repeating a release for the same source revision produces no commit if the distribution already matches.
-Concurrent release runs queue, and a competing remote update causes the ordinary push to fail rather than overwrite history.
+The staged runtime files are compared with the committed distribution, excluding `SOURCE_REVISION`.
+If the runtime files are identical, publication is skipped and the committed marker stays at the last published revision.
+Changes confined to tests, development tooling, or manifest fields removed by the builder therefore produce no release commit.
+The next release message includes source commits since the last published revision, including commits from skipped runs.
+File additions, deletions, and executable mode changes count as runtime changes.
+Eligible publication jobs share one concurrency group with `queue: max`, retaining up to 100 pending jobs while one job publishes.
+Jobs beyond that limit are cancelled by GitHub and need to be rerun.
+The queue prevents an older CI completion from replacing a pending release for a newer source commit.
+A competing remote update causes the ordinary push to fail rather than overwrite history.
 If a release fails before the push, fix the cause and rerun it.
 
 ## Maintain the file allowlist
@@ -109,7 +126,12 @@ README files are copied without changing their contents.
 
 When adding runtime files outside existing patterns, update the allowlist and add a focused distribution assertion.
 The distribution tests check file boundaries, package paths, marketplace roots, deterministic output, executable modes, isolated Python CLI execution, and removal of files from a checkout containing the previous development tree.
-Message tests use local Git repositories to verify release boundaries, description preservation, metadata removal, the first release, invalid revisions, and rollbacks.
+Message tests use local Git repositories to verify release boundaries, description preservation, metadata removal, required revision markers, invalid revisions, and rollback message formatting.
+Preparation tests build and stage files in local Git repositories to verify publication decisions, unchanged runtime contents, manifest transformations, file and mode changes, revision ordering, invalid histories, and Actions summary output.
+Workflow tests evaluate the publication guard and revision expressions, check the queue configuration, and execute the publication summary shell against a local Git repository.
+GitHub supports `queue: max`, but actionlint 1.7.12 does not recognize the property.
+The workflow lint command ignores only that schema warning until actionlint supports it.
+The release workflow also documents an exception for zizmor's general `workflow_run` warning; the job guard restricts publication to successful push runs on `main` from this repository.
 Signing tests verify the generated body in a real commit made with an exported signing subkey, the configured author and committer email, temporary keyring cleanup, rejection of invalid or missing secrets, rejection of a wrong passphrase, and handling of an unchanged distribution.
 
 ## History and installation
