@@ -109,23 +109,60 @@ class RunnerTests(unittest.TestCase):
             exit_code = run_parallel.main(list(argv))
         return exit_code, output.getvalue()
 
-    def test_passing_modules_exit_zero_and_list_slowest_tests(self) -> None:
-        exit_code, output = self.run_main("runner_passing_fixture", "--durations", "1")
+    def test_passing_modules_exit_zero_and_list_test_durations(self) -> None:
+        exit_code, output = self.run_main("runner_passing_fixture", "--durations", "0")
 
         self.assertEqual(exit_code, 0, output)
         self.assertIn("ok   runner_passing_fixture: 2 tests in", output)
         slowest = output.split("Slowest test durations\n", 1)[1]
         self.assertIn("test_sleeps (runner_passing_fixture.Passing.test_sleeps)", slowest)
-        self.assertNotIn("test_returns", slowest)
+        self.assertIn("test_returns (runner_passing_fixture.Passing.test_returns)", slowest)
         self.assertIn("\nRan 2 tests in ", output)
         self.assertTrue(output.endswith("\nOK\n"), output)
 
-    def test_durations_include_tests_faster_than_a_millisecond(self) -> None:
+    def test_durations_include_the_selected_test(self) -> None:
         exit_code, output = self.run_main("runner_passing_fixture.Passing.test_returns")
 
         self.assertEqual(exit_code, 0, output)
         slowest = output.split("Slowest test durations\n", 1)[1]
-        self.assertIn("0.000s  test_returns (runner_passing_fixture.Passing.test_returns)", slowest)
+        self.assertIn("test_returns (runner_passing_fixture.Passing.test_returns)", slowest)
+
+    def test_durations_sort_across_modules_and_limit_the_output(self) -> None:
+        runs = [
+            run_parallel.ModuleRun(
+                "first",
+                0,
+                "",
+                0.0,
+                run_parallel.Report(2, [], [("fast", 0.0001), ("slow", 2.0)]),
+            ),
+            run_parallel.ModuleRun(
+                "second",
+                0,
+                "",
+                0.0,
+                run_parallel.Report(1, [], [("middle", 1.0)]),
+            ),
+        ]
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            run_parallel._print_durations(runs, 2)
+
+        self.assertEqual(output.getvalue().splitlines()[3:], ["2.000s  slow", "1.000s  middle"])
+
+    def test_durations_include_tests_faster_than_a_millisecond(self) -> None:
+        run = run_parallel.ModuleRun(
+            "first",
+            0,
+            "",
+            0.0,
+            run_parallel.Report(1, [], [("fast", 0.0001)]),
+        )
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            run_parallel._print_durations([run], 0)
+
+        self.assertEqual(output.getvalue().splitlines()[3:], ["0.000s  fast"])
 
     def test_skipped_tests_are_counted_and_listed_with_reasons(self) -> None:
         exit_code, output = self.run_main("runner_skipping_fixture")
