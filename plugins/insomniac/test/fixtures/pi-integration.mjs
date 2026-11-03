@@ -74,7 +74,7 @@ syncBuiltinESMExports();
 
 const host = await import(process.env.INSOMNIAC_TEST_PI ?? "@earendil-works/pi-coding-agent");
 
-assert.equal(host.VERSION, "1.4.0");
+assert.equal(host.VERSION, "1.5.0");
 
 console.log(`Pi runtime: ${host.VERSION}`);
 
