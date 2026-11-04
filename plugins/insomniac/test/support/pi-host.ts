@@ -4,6 +4,8 @@ import {
   type ExtensionAPI,
   type ExtensionContext,
   type ExtensionCommandContext,
+  type UIPromptStartEvent,
+  type UIPromptEndEvent,
 } from "@earendil-works/pi-coding-agent";
 import { stripTerminalSequences } from "@earendil-works/pi-tui";
 import { vi } from "vitest";
@@ -15,10 +17,9 @@ type FixtureContext = Pick<
   "signal" | "mode" | "hasUI" | "cwd" | "model" | "thinkingLevel" | "getContextUsage" | "sessionManager"
 > & { ui: Pick<ExtensionContext["ui"], "setFooter" | "notify"> };
 
-interface FixtureEvent {
-  type: string;
-  aborted?: boolean;
-}
+type PromptEvent = UIPromptStartEvent | UIPromptEndEvent;
+
+type FixtureEvent = { type: string; aborted?: boolean } | PromptEvent;
 
 type Handler = (event: FixtureEvent, ctx: ExtensionContext) => void | Promise<void>;
 
@@ -122,7 +123,7 @@ export function createPiHost(mode: ExtensionContext["mode"] = "tui") {
     },
   };
 
-  // SAFETY: The fixture checks the API and context members Insomniac reads and supplies settlement's aborted flag.
+  // SAFETY: The fixture checks consumed API/context members and supplies settlement and prompt payloads.
   const pi = fixtureAPI as ExtensionAPI;
 
   return {
@@ -137,10 +138,15 @@ export function createPiHost(mode: ExtensionContext["mode"] = "tui") {
       // SAFETY: The command uses only the checked ExtensionContext members, with no session control actions.
       await command.handler(args, ctx as ExtensionCommandContext);
     },
-    emit: (type: string, aborted = abortController.signal.aborted) =>
-      [...(handlers.get(type) ?? [])].map((handler) =>
-        handler(type === "agent_settled" ? { type, aborted } : { type }, ctx),
-      ),
+    emit: (type: string | PromptEvent, aborted = abortController.signal.aborted) => {
+      // oxlint-disable-next-line anti-slop/no-runtime-typeof -- This fixture boundary accepts checked payloads or legacy event names.
+      const event = typeof type !== "string" ? type : type === "agent_settled" ? { type, aborted } : { type };
+
+      if ((event.type === "ui_prompt_start" || event.type === "ui_prompt_end") && !("kind" in event))
+        throw new Error("Prompt events require a checked payload");
+
+      return [...(handlers.get(event.type) ?? [])].map((handler) => handler(event, ctx));
+    },
     render: (width = 100) => footer?.render(width).map(stripTerminalSequences).join("\n"),
     raw: (width = 100) => footer?.render(width).join("\n"),
     requestRender,

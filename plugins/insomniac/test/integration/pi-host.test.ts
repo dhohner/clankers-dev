@@ -41,6 +41,7 @@ it.each(["standard", "none"])(
     const [code] = await once(child, "exit");
     expect(code, output).toBe(0);
     expect(output).toContain("Pi lifecycle integration passed");
+    expect(output).toContain("Pi confirmation integration passed");
   },
   10000,
 );

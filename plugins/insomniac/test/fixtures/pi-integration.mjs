@@ -7,6 +7,13 @@ import { syncBuiltinESMExports } from "node:module";
 import { once } from "node:events";
 import { basename, resolve, dirname } from "node:path";
 import { mkdir, writeFile } from "node:fs/promises";
+import { mock } from "node:test";
+// Pi queues prompt events as microtasks; yield a turn so their Promise continuations also finish.
+import { setImmediate as yieldToEventLoop } from "node:timers/promises";
+
+const realSetTimeout = setTimeout;
+
+const realDelay = (milliseconds) => new Promise((complete) => realSetTimeout(complete, milliseconds));
 
 // Source identity is controlled without reading the host's environment or foreground app.
 for (const key of [
@@ -118,8 +125,35 @@ let renders = 0;
 
 const notifications = [];
 
+const confirmations = [];
+
+const promptEvents = [];
+
+const emit = runner.emit.bind(runner);
+
+runner.emit = (event) => {
+  if (event.type === "ui_prompt_start" || event.type === "ui_prompt_end") promptEvents.push(event);
+
+  return emit(event);
+};
+
 runner.setUIContext(
   {
+    confirm(_title, _message, options) {
+      return new Promise((complete, reject) => {
+        const abort = () => complete(false);
+
+        const finish = (value) => {
+          options?.signal?.removeEventListener("abort", abort);
+          complete(value);
+        };
+
+        options?.signal?.addEventListener("abort", abort, { once: true });
+
+        if (options?.signal?.aborted) abort();
+        confirmations.push({ complete: finish, reject });
+      });
+    },
     notify(message, type) {
       notifications.push({ message, type });
       console.log(`${type}: ${message}`);
@@ -238,11 +272,113 @@ try {
   await runner.emit({ type: "session_shutdown", reason: "exit" });
   await gone(children[2]);
   assert.match(render(), /can sleep/u);
+  // Use the real UI wrapper with controlled answers and deterministic attention timers.
+  mock.timers.enable({ apis: ["setTimeout"] });
+
+  const advance = async (milliseconds) => {
+    elapsed += milliseconds;
+    mock.timers.tick(milliseconds);
+    await yieldToEventLoop();
+  };
+
+  const ui = runner.createContext().ui;
+
+  const waitForNotice = async (count) => {
+    for (let attempt = 0; attempt < 100 && desktopRequests.length < count; attempt++) await realDelay(5);
+    assert.equal(desktopRequests.length, count);
+  };
+
+  for (const outcome of ["resolve", "dismiss", "abort", "reject"]) {
+    await runner.emit({ type: "session_start" });
+    await runner.emit({ type: "agent_start" });
+    const child = children.at(-1);
+    await once(child, "spawn");
+    const controller = new AbortController();
+    const eventsBefore = promptEvents.length;
+    const confirmation = ui.confirm("Sensitive dialog", "Private command and response", { signal: controller.signal });
+
+    const result = confirmation.then(
+      (value) => value,
+      (error) => error.message,
+    );
+
+    await yieldToEventLoop();
+    assert.equal(promptEvents.at(-1).type, "ui_prompt_start");
+    assert.equal(promptEvents.at(-1).kind, "confirm");
+    await advance(9_999);
+
+    if (outcome === "abort") controller.abort();
+    else if (outcome === "reject") confirmations.at(-1).reject(new Error("fixture rejection"));
+    else confirmations.at(-1).complete(outcome === "resolve");
+    assert.equal(await result, outcome === "reject" ? "fixture rejection" : outcome === "resolve");
+    await yieldToEventLoop();
+    assert.deepEqual(
+      promptEvents.slice(eventsBefore).map(({ type, kind }) => [type, kind]),
+      [
+        ["ui_prompt_start", "confirm"],
+        ["ui_prompt_end", "confirm"],
+      ],
+    );
+    await advance(1);
+    await realDelay(5);
+    assert.equal(desktopRequests.length, 1, `${outcome} cancels attention`);
+    assert.equal(live(child.pid), true, "confirmation waits preserve sleep ownership");
+    await runner.emit({ type: "agent_settled", aborted: outcome === "abort" });
+    await gone(child);
+    assert.match(render(), /can sleep/u);
+  }
+
+  await runner.emit({ type: "session_start" });
+  await runner.emit({ type: "agent_start" });
+  const waitingChild = children.at(-1);
+  await once(waitingChild, "spawn");
+  const eventsBefore = promptEvents.length;
+  const outer = ui.confirm("Outer secret", "Do not send this command");
+  const outerControl = confirmations.at(-1);
+  const nested = ui.confirm("Nested secret", "Do not send this response");
+  const nestedControl = confirmations.at(-1);
+  await yieldToEventLoop();
+  assert.equal(promptEvents.length, eventsBefore + 1, "nested prompts share the outer lifecycle");
+  await advance(10_000);
+  await waitForNotice(2);
+  assert.equal(live(waitingChild.pid), true);
+  const attention = desktopRequests.at(-1);
+  assert.deepEqual(
+    expectedCommand === "/usr/bin/osascript" ? attention.args.slice(4) : attention.args,
+    expectedCommand === "/usr/bin/osascript"
+      ? ["--", "Pi needs your attention", `${basename(process.cwd())} · Demo review`]
+      : [
+          "-title",
+          "\\Pi needs your attention",
+          "-message",
+          `\\${basename(process.cwd())} · Demo review`,
+          "-activate",
+          "com.apple.Terminal",
+        ],
+  );
+  outerControl.complete(true);
+  assert.equal(await outer, true);
+  await advance(20_000);
+  assert.equal(promptEvents.length, eventsBefore + 1, "outer completion alone does not end the nested wait");
+  assert.equal(desktopRequests.length, 2, "no recurring or nested attention attempt");
+  nestedControl.complete(false);
+  assert.equal(await nested, false);
+  await yieldToEventLoop();
+  assert.equal(promptEvents.at(-1).type, "ui_prompt_end");
+  assert.equal(promptEvents.at(-1).title, "Outer secret");
+  await runner.emit({ type: "agent_settled", aborted: true });
+  await gone(waitingChild);
+  await runner.emit({ type: "session_shutdown", reason: "exit" });
   assert.deepEqual(errors, []);
+  console.log(
+    "Pi confirmation integration passed: resolve, dismiss, abort, reject, nested lifecycle, attention, sleep ownership",
+  );
   console.log(
     "Pi lifecycle integration passed: session cost, startup, duplicate/retry, settlement, reload, shutdown, real child termination",
   );
 } finally {
+  mock.timers.reset();
+
   for (const child of children) child.kill();
   footer?.dispose?.();
 }
