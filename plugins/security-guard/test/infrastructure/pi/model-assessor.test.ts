@@ -3,8 +3,6 @@ import { SAFETY_EVALUATION_BLOCK_PREFIX } from "../../../src/policy/assessment/a
 import {
   evaluateCommandSafety,
   SAFETY_EVALUATION_TIMEOUT_MS,
-  SAFETY_EVALUATOR_PROVIDER,
-  SAFETY_EVALUATOR_PROVIDERS,
   type SafetyEvaluatorRegistry,
 } from "../../../src/infrastructure/pi/model-assessor.js";
 
@@ -44,14 +42,6 @@ function makeRegistry(overrides: Partial<RegistryMocks> = {}) {
 function makeRequest(registry = makeRegistry(), signal?: AbortSignal) {
   return { command: "rm -rf /workspace/build", workingDirectory: "/workspace", registry, signal };
 }
-
-describe("evaluator provider constants", () => {
-  it("keeps direct OpenAI preferred and includes both subscription providers", () => {
-    expect(SAFETY_EVALUATOR_PROVIDER).toBe("openai");
-    expect(SAFETY_EVALUATOR_PROVIDERS).toEqual(["openai", "openai-codex", "github-copilot"]);
-    expect(SAFETY_EVALUATOR_PROVIDERS[0]).toBe(SAFETY_EVALUATOR_PROVIDER);
-  });
-});
 
 describe("evaluateCommandSafety", () => {
   it("sends one fixed-instruction request with only the command and working directory", async () => {

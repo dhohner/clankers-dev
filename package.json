@@ -55,7 +55,7 @@
     "plugins/output-styles/README.md",
     "plugins/output-styles/LICENSE",
     "plugins/security-guard/index.ts",
-    "plugins/security-guard/lib/**",
+    "plugins/security-guard/src/**",
     "plugins/security-guard/package.json",
     "plugins/security-guard/README.md",
     "plugins/insomniac/index.ts",

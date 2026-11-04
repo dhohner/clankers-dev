@@ -4,7 +4,6 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   allInsideRegenerableDirectory,
-  isInsideRegenerableDirectory,
   REGENERABLE_DIRECTORY_NAMES,
 } from "../../../src/infrastructure/node/regenerable-directory.js";
 import { isInsideTemporaryRoot } from "../../../src/infrastructure/node/temporary-root.js";
@@ -48,6 +47,10 @@ async function makeSibling(project: string, name: string): Promise<string> {
 
 const literal = (path: string) => ({ path, insideMktempDirectory: false, followsLinks: false });
 
+function allowsTarget(path: string, cwd: string | undefined, followsLinks = false): Promise<boolean> {
+  return allInsideRegenerableDirectory([{ path, insideMktempDirectory: false, followsLinks }], cwd);
+}
+
 afterEach(async () => {
   await Promise.all(cleanups.splice(0).map((cleanup) => cleanup()));
 });
@@ -67,31 +70,31 @@ describe("regenerable directory targets", () => {
   it("accepts an exempt directory, an entry inside one, and a file inside one", async () => {
     const project = await makeProject();
 
-    await expect(isInsideRegenerableDirectory("node_modules", project)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("dist", project)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("dist/", project)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("./dist/cache", project)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("dist/app.js", project)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("packages/a/node_modules", project)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory(join(project, "dist/cache"), "/")).resolves.toBe(true);
+    await expect(allowsTarget("node_modules", project)).resolves.toBe(true);
+    await expect(allowsTarget("dist", project)).resolves.toBe(true);
+    await expect(allowsTarget("dist/", project)).resolves.toBe(true);
+    await expect(allowsTarget("./dist/cache", project)).resolves.toBe(true);
+    await expect(allowsTarget("dist/app.js", project)).resolves.toBe(true);
+    await expect(allowsTarget("packages/a/node_modules", project)).resolves.toBe(true);
+    await expect(allowsTarget(join(project, "dist/cache"), "/")).resolves.toBe(true);
     // A file that does not exist yet is still confined to the directory it would be created in.
-    await expect(isInsideRegenerableDirectory("dist/missing.js", project)).resolves.toBe(true);
+    await expect(allowsTarget("dist/missing.js", project)).resolves.toBe(true);
   });
 
   it("rejects the source tree, the working directory, and its ancestors", async () => {
     const project = await makeProject();
 
-    await expect(isInsideRegenerableDirectory("src", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("src/a.ts", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory(".", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("..", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("/", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("~", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("/etc/hosts", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist", undefined)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist", "relative")).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist", join(project, "missing"))).resolves.toBe(false);
+    await expect(allowsTarget("src", project)).resolves.toBe(false);
+    await expect(allowsTarget("src/a.ts", project)).resolves.toBe(false);
+    await expect(allowsTarget(".", project)).resolves.toBe(false);
+    await expect(allowsTarget("..", project)).resolves.toBe(false);
+    await expect(allowsTarget("/", project)).resolves.toBe(false);
+    await expect(allowsTarget("~", project)).resolves.toBe(false);
+    await expect(allowsTarget("/etc/hosts", project)).resolves.toBe(false);
+    await expect(allowsTarget("", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist", undefined)).resolves.toBe(false);
+    await expect(allowsTarget("dist", "relative")).resolves.toBe(false);
+    await expect(allowsTarget("dist", join(project, "missing"))).resolves.toBe(false);
   });
 
   it("rejects an exempt name that is not an existing directory", async () => {
@@ -101,20 +104,20 @@ describe("regenerable directory targets", () => {
     await symlink(join(project, "missing"), join(project, "coverage"));
 
     // A source file named after build output is still source.
-    await expect(isInsideRegenerableDirectory("build", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("build/*", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("src/out", project)).resolves.toBe(false);
+    await expect(allowsTarget("build", project)).resolves.toBe(false);
+    await expect(allowsTarget("build/*", project)).resolves.toBe(false);
+    await expect(allowsTarget("src/out", project)).resolves.toBe(false);
     // Nothing exists at the name, so nothing there is build output either.
-    await expect(isInsideRegenerableDirectory("target", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("target/x", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("coverage", project)).resolves.toBe(false);
+    await expect(allowsTarget("target", project)).resolves.toBe(false);
+    await expect(allowsTarget("target/x", project)).resolves.toBe(false);
+    await expect(allowsTarget("coverage", project)).resolves.toBe(false);
   });
 
   it("matches a whole path component, never a prefix", async () => {
     const project = await makeProject();
 
-    await expect(isInsideRegenerableDirectory("dist-backup", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist-backup/x", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist-backup", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist-backup/x", project)).resolves.toBe(false);
   });
 
   it("rejects an exempt directory in another project, however it is spelled", async () => {
@@ -122,11 +125,11 @@ describe("regenerable directory targets", () => {
     const sibling = await makeSibling(project, "other");
     const relative = `../${sibling.split("/").at(-1)}/node_modules`;
 
-    await expect(isInsideRegenerableDirectory(relative, project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory(join(sibling, "node_modules"), project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory(`dist/${relative}`, project)).resolves.toBe(false);
+    await expect(allowsTarget(relative, project)).resolves.toBe(false);
+    await expect(allowsTarget(join(sibling, "node_modules"), project)).resolves.toBe(false);
+    await expect(allowsTarget(`dist/${relative}`, project)).resolves.toBe(false);
     // The package's own `node_modules` is another project's too, from a working directory inside it.
-    await expect(isInsideRegenerableDirectory(join(PACKAGE_ROOT, "node_modules"), project)).resolves.toBe(false);
+    await expect(allowsTarget(join(PACKAGE_ROOT, "node_modules"), project)).resolves.toBe(false);
   });
 
   it("exempts nothing when the working directory is itself an exempt directory", async () => {
@@ -135,9 +138,9 @@ describe("regenerable directory targets", () => {
     await mkdir(inside);
     await writeFile(join(inside, "index.js"), "");
 
-    await expect(isInsideRegenerableDirectory("index.js", inside)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory(".", join(project, "node_modules"))).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("..", inside)).resolves.toBe(false);
+    await expect(allowsTarget("index.js", inside)).resolves.toBe(false);
+    await expect(allowsTarget(".", join(project, "node_modules"))).resolves.toBe(false);
+    await expect(allowsTarget("..", inside)).resolves.toBe(false);
   });
 
   it("resolves parent traversal the way the kernel does", async () => {
@@ -145,13 +148,13 @@ describe("regenerable directory targets", () => {
     const sibling = await makeSibling(project, "linked");
     await symlink(sibling, join(project, "dist/link"));
 
-    await expect(isInsideRegenerableDirectory("dist/../src", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/../dist/cache", project)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("src/../dist", project)).resolves.toBe(true);
+    await expect(allowsTarget("dist/../src", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/../dist/cache", project)).resolves.toBe(true);
+    await expect(allowsTarget("src/../dist", project)).resolves.toBe(true);
     // `path.resolve` would read `dist/link/..` as `dist`; the kernel reads it as the sibling's parent.
-    await expect(isInsideRegenerableDirectory("dist/link/../node_modules", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/link/..", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/missing/../cache", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/link/../node_modules", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/link/..", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/missing/../cache", project)).resolves.toBe(false);
   });
 
   it("rejects an exempt entry that is a symlink out of the working directory", async () => {
@@ -160,17 +163,17 @@ describe("regenerable directory targets", () => {
     await rm(join(project, "node_modules"), { recursive: true });
     await symlink(join(sibling, "node_modules"), join(project, "node_modules"));
 
-    await expect(isInsideRegenerableDirectory("node_modules", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("node_modules/", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("node_modules/secret", project)).resolves.toBe(false);
+    await expect(allowsTarget("node_modules", project)).resolves.toBe(false);
+    await expect(allowsTarget("node_modules/", project)).resolves.toBe(false);
+    await expect(allowsTarget("node_modules/secret", project)).resolves.toBe(false);
   });
 
   it("rejects an exempt entry that is a symlink to the source tree", async () => {
     const project = await makeProject();
     await symlink(join(project, "src"), join(project, "build"));
 
-    await expect(isInsideRegenerableDirectory("build", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("build/a.ts", project)).resolves.toBe(false);
+    await expect(allowsTarget("build", project)).resolves.toBe(false);
+    await expect(allowsTarget("build/a.ts", project)).resolves.toBe(false);
   });
 
   it("still accepts an exempt directory that contains a symlink out of the tree", async () => {
@@ -181,10 +184,10 @@ describe("regenerable directory targets", () => {
 
     // The operand's own entry and target both resolve inside the working directory; `rm -rf dist` removes
     // the link entries below it without following them.
-    await expect(isInsideRegenerableDirectory("dist", project)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("dist/escape", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/escape/node_modules", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/root/etc", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist", project)).resolves.toBe(true);
+    await expect(allowsTarget("dist/escape", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/escape/node_modules", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/root/etc", project)).resolves.toBe(false);
   });
 
   it("rejects a link outside the exempt directory that points into it", async () => {
@@ -193,31 +196,31 @@ describe("regenerable directory targets", () => {
     await symlink(join(project, "dist/app.js"), join(project, "src/to-app"));
 
     // `rm -rf src/to-dist` removes the link entry, which lives in the source tree.
-    await expect(isInsideRegenerableDirectory("src/to-dist", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("src/to-app", project)).resolves.toBe(false);
+    await expect(allowsTarget("src/to-dist", project)).resolves.toBe(false);
+    await expect(allowsTarget("src/to-app", project)).resolves.toBe(false);
     // Reaching through the link to an entry inside `dist` is the kernel's resolution of the path.
-    await expect(isInsideRegenerableDirectory("src/to-dist/app.js", project)).resolves.toBe(true);
+    await expect(allowsTarget("src/to-dist/app.js", project)).resolves.toBe(true);
   });
 
   it("reduces a wildcard to its literal directory prefix", async () => {
     const project = await makeProject();
     await symlink(join(project, "src"), join(project, "dist/to-src"));
 
-    await expect(isInsideRegenerableDirectory("dist/*.js", project)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("dist/*", project)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("dist/cache/*", project)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory(join(project, "dist/*"), "/")).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("*", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("./*", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("src/*", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist-backup/*", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/to-src/*", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/*/..", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/*/*", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/**", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/**/*.js", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("*/node_modules", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/missing/*", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/*.js", project)).resolves.toBe(true);
+    await expect(allowsTarget("dist/*", project)).resolves.toBe(true);
+    await expect(allowsTarget("dist/cache/*", project)).resolves.toBe(true);
+    await expect(allowsTarget(join(project, "dist/*"), "/")).resolves.toBe(true);
+    await expect(allowsTarget("*", project)).resolves.toBe(false);
+    await expect(allowsTarget("./*", project)).resolves.toBe(false);
+    await expect(allowsTarget("src/*", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist-backup/*", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/to-src/*", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/*/..", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/*/*", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/**", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/**/*.js", project)).resolves.toBe(false);
+    await expect(allowsTarget("*/node_modules", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/missing/*", project)).resolves.toBe(false);
   });
 
   it("keeps the temporary-root rules for hard links and ownership", async () => {
@@ -225,14 +228,14 @@ describe("regenerable directory targets", () => {
     await writeFile(join(project, "src/original"), "secret");
     await link(join(project, "src/original"), join(project, "dist/linked"));
 
-    await expect(isInsideRegenerableDirectory("dist/linked", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/app.js", project)).resolves.toBe(true);
+    await expect(allowsTarget("dist/linked", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/app.js", project)).resolves.toBe(true);
 
     const uid = process.getuid?.() ?? 0;
     vi.spyOn(process, "getuid").mockReturnValue(uid + 1);
-    await expect(isInsideRegenerableDirectory("dist/app.js", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist", project)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/*", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/app.js", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist", project)).resolves.toBe(false);
+    await expect(allowsTarget("dist/*", project)).resolves.toBe(false);
   });
 
   it("checks the target of a symlink for a command that follows it", async () => {
@@ -241,9 +244,9 @@ describe("regenerable directory targets", () => {
     await symlink(join(project, "dist/app.js"), join(project, "dist/to-app"));
     await symlink(join(project, "src/absent"), join(project, "dist/dangling"));
 
-    await expect(isInsideRegenerableDirectory("dist/to-source", project, true)).resolves.toBe(false);
-    await expect(isInsideRegenerableDirectory("dist/to-app", project, true)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("dist/dangling", project, true)).resolves.toBe(false);
+    await expect(allowsTarget("dist/to-source", project, true)).resolves.toBe(false);
+    await expect(allowsTarget("dist/to-app", project, true)).resolves.toBe(true);
+    await expect(allowsTarget("dist/dangling", project, true)).resolves.toBe(false);
   });
 
   it("requires every target to be inside a regenerable directory", async () => {
@@ -288,8 +291,8 @@ describe("regenerable directory targets", () => {
     const alias = cleanupLater(join(dirname(project), `.corpus-workspace-alias-${project.split("-").at(-1)}`));
     await symlink(project, alias);
 
-    await expect(isInsideRegenerableDirectory("dist", alias)).resolves.toBe(true);
-    await expect(isInsideRegenerableDirectory("src", alias)).resolves.toBe(false);
+    await expect(allowsTarget("dist", alias)).resolves.toBe(true);
+    await expect(allowsTarget("src", alias)).resolves.toBe(false);
     await expect(realpath(alias)).resolves.toBe(await realpath(project));
   });
 });
