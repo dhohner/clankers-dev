@@ -41,6 +41,8 @@ Prompt application and serialization belong in `prompt.test.ts` and `create-styl
 
 `storage/` tests `src/storage/`.
 `settings.test.ts` uses real temporary files and locks to check persistence, permissions, replacement, and concurrent writes.
+Lock retry boundaries use controlled timers while filesystem operations remain real.
+Filesystem failure tests patch the Node filesystem methods and restore them after each test.
 `filesystem.test.ts` checks filesystem error decoding.
 `json.test.ts` checks JSON object parsing.
 
@@ -48,6 +50,7 @@ Prompt application and serialization belong in `prompt.test.ts` and `create-styl
 
 `integration/pi-loader.test.ts` checks loading and registration through the real Pi loader, then bundled style selection and prompt application through Pi's session and turn dispatch.
 It uses temporary project and agent directories, disables model discovery over the network, and emits events through `ExtensionRunner` without making a model request.
+`integration/settings-lock.test.ts` checks that a write waits for a separate process to release Pi's settings lock and preserves that process's changes.
 `integration/package-layout.test.ts` checks exports and package contents declared by the manifests.
 `integration/dependency-boundaries.test.ts` checks the separation of Pi runtime imports and adapters from the other modules.
 
@@ -67,7 +70,9 @@ A test that states normal behavior belongs in the concern file above, even when 
 ## Rules for shared code
 
 - Shared fixtures belong in `support/`.
-  Reuse the harness factory, temporary directory variables, style helpers, and cleanup hooks from `support/extension-harness.ts`.
+  Reuse the harness factory, temporary directory variables, and style helpers from `support/extension-harness.ts`.
+  Call `registerHarnessHooks()` in each file that uses its temporary directories so hooks register when workers reuse cached modules.
+  Pure tests do not register these filesystem hooks.
 - Inject filesystem failures through `support/filesystem.ts`.
   Each test file owns its failure records and clears them in its own `afterEach`.
 - Use `support/persistence.ts` for controlled persistence failures and delayed writes.
@@ -76,4 +81,6 @@ A test that states normal behavior belongs in the concern file above, even when 
 - Use `support/deferred.ts` to control asynchronous completion without elapsed time delays.
 - The Vitest configuration shuffles file and test order.
   Tests must not depend on state created by another file or test.
+  Run `pnpm test:ts:reuse` from the repository root to check every plugin with one worker and shuffle seed 1.
+  CI runs that command on each relevant change and tries three additional seeds each week.
 - `expect.requireAssertions` is active, so every test must assert.

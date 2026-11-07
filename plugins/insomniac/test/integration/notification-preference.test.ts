@@ -1,10 +1,14 @@
+import { registerAgentDirectoryHooks } from "../support/agent-directory.ts";
 import { fork, type ChildProcess } from "node:child_process";
+
 import { once } from "node:events";
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { NotificationPreference } from "../../src/pi/notification-preference.ts";
+
+registerAgentDirectoryHooks();
 
 function message(child: ChildProcess, expected: string): Promise<void> {
   return new Promise((resolve, reject) => {

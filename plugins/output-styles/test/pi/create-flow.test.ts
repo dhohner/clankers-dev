@@ -5,6 +5,7 @@ import { STYLES_DIR_NAME } from "../../src/pi/registration.js";
 import { OUTPUT_STYLE_KEY, SETTINGS_FILE_NAME } from "../../src/storage/settings.js";
 import { parseStyleFile } from "../../src/styles/style-file.js";
 import {
+  registerHarnessHooks,
   agentDir,
   bundledDir,
   CHAINED_PROMPT,
@@ -18,6 +19,8 @@ import {
 
 import { failingFileSystem, harnessWithFileSystem } from "../support/filesystem.js";
 import { parseJsonObject, type JsonObject } from "../../src/storage/json.js";
+
+registerHarnessHooks();
 
 type ListFailures = { path?: string; errors: Array<{ message: string; code: string }> };
 

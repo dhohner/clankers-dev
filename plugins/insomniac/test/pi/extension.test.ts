@@ -1,9 +1,13 @@
+import { registerAgentDirectoryHooks } from "../support/agent-directory.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+
 import { visibleWidth } from "@earendil-works/pi-tui";
 import { expect, it, vi } from "vitest";
 import { installInsomniac } from "../../index.ts";
 import { createPiHost } from "../support/pi-host.ts";
 import { createAssertionProcess } from "../support/assertion-process.ts";
+
+registerAgentDirectoryHooks();
 
 function session(platform: NodeJS.Platform = "darwin", mode: ExtensionContext["mode"] = "tui", denied = false) {
   const host = createPiHost(mode);

@@ -1,6 +1,10 @@
+import { registerAgentDirectoryHooks } from "../support/agent-directory.ts";
 import { expect, it, vi } from "vitest";
+
 import { installNotifications } from "../../src/pi/notifications.ts";
 import { createPiHost } from "../support/pi-host.ts";
+
+registerAgentDirectoryHooks();
 
 const flush = () => new Promise(setImmediate);
 

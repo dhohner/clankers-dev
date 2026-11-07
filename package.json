@@ -8,9 +8,10 @@
     "pi-package"
   ],
   "scripts": {
-    "check": "pnpm lint:ts && pnpm lint:py && pnpm lint:workflows && pnpm test:ts && pnpm coverage:ts && pnpm test:py",
+    "check": "pnpm lint:ts && pnpm lint:py && pnpm lint:workflows && pnpm test:ts:uncovered && pnpm coverage:ts && pnpm test:py",
     "test": "pnpm test:ts && pnpm test:py:fast",
     "test:ts": "vitest run",
+    "test:ts:reuse": "vitest run --maxWorkers=1 --no-isolate --sequence.seed=1",
     "coverage:ts": "pnpm --recursive --if-present run coverage",
     "test:ts:uncovered": "vitest run --project '!output-styles'",
     "test:py": "uv run --no-project --isolated --python 3.14 python plugins/project-advisor/skills/to-prd/tests/run_parallel.py",

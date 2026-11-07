@@ -4,9 +4,11 @@
 import { join } from "node:path";
 import { afterEach, expect, it } from "vitest";
 import { STYLES_DIR_NAME } from "../../src/pi/registration.js";
-import { agentDir, styleFile, writeStyle } from "../support/extension-harness.js";
+import { registerHarnessHooks, agentDir, styleFile, writeStyle } from "../support/extension-harness.js";
 
 import { failingFileSystem, harnessWithFileSystem, type ListFailures } from "../support/filesystem.js";
+
+registerHarnessHooks();
 
 const listFailures: ListFailures = {};
 

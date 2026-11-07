@@ -4,6 +4,7 @@ export default defineConfig({
   test: {
     name: { label: "output-styles", color: "cyan" },
     allowOnly: false,
+    isolate: false,
     expect: { requireAssertions: true },
     // Every test works on local files only, and the slowest one stays far below this limit.
     // A test that needs more time waits for something it must not wait for.

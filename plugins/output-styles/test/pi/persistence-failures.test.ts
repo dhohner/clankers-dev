@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { STYLES_DIR_NAME } from "../../src/pi/registration.ts";
 import { SETTINGS_FILE_NAME } from "../../src/storage/settings.ts";
 import {
+  registerHarnessHooks,
   agentDir,
   CHAINED_PROMPT,
   CONFIG_DIR_NAME,
@@ -12,8 +13,11 @@ import {
   styleStatus,
   writeStyle,
 } from "../support/extension-harness.ts";
+
 import { deferred } from "../support/deferred.ts";
 import { MemoryStylePersistence } from "../support/persistence.ts";
+
+registerHarnessHooks();
 
 async function userStyles(): Promise<void> {
   const directory = join(agentDir, STYLES_DIR_NAME);

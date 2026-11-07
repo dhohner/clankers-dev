@@ -5,6 +5,7 @@ import { parseJsonObject, type JsonObject } from "../../src/storage/json.js";
 import { STYLES_DIR_NAME } from "../../src/pi/registration.js";
 import { OUTPUT_STYLE_KEY, SETTINGS_FILE_NAME } from "../../src/storage/settings.js";
 import {
+  registerHarnessHooks,
   agentDir,
   CHAINED_PROMPT,
   CONFIG_DIR_NAME,
@@ -14,6 +15,8 @@ import {
   styleStatus,
   writeStyle,
 } from "../support/extension-harness.js";
+
+registerHarnessHooks();
 
 describe("style persistence", () => {
   /** The parser message varies by runtime, so the expected text is derived from the same parser. */

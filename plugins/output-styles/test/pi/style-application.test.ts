@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FLAG_NAME, STYLES_DIR_NAME } from "../../src/pi/registration.js";
 import {
+  registerHarnessHooks,
   agentDir,
   CHAINED_PROMPT,
   CONFIG_DIR_NAME,
@@ -12,6 +13,8 @@ import {
   styleFile,
   writeStyle,
 } from "../support/extension-harness.js";
+
+registerHarnessHooks();
 
 describe("output styles extension", () => {
   it("registers the string flag Pi parses the value with", () => {

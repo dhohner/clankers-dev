@@ -1,9 +1,13 @@
+import { registerAgentDirectoryHooks } from "../support/agent-directory.ts";
 import { execFile } from "node:child_process";
+
 import * as filesystem from "node:fs/promises";
 import { promisify } from "node:util";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { NotificationPreference } from "../../src/pi/notification-preference.ts";
+
+registerAgentDirectoryHooks();
 
 // Absence must remain distinguishable from a saved value and a read failure.
 it("distinguishes an absent preference from valid values and failed reads", async () => {

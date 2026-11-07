@@ -1,4 +1,6 @@
+import { registerAgentDirectoryHooks } from "../support/agent-directory.ts";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+
 import * as filesystem from "node:fs/promises";
 import { expect, it, vi } from "vitest";
 import type { NotificationExecutor } from "../../src/pi/desktop-notification.ts";
@@ -6,6 +8,8 @@ import { installNotifications } from "../../src/pi/notifications.ts";
 import { installInsomniac } from "../../index.ts";
 import { createAssertionProcess } from "../support/assertion-process.ts";
 import { createPiHost } from "../support/pi-host.ts";
+
+registerAgentDirectoryHooks();
 
 const flush = () => new Promise(setImmediate);
 

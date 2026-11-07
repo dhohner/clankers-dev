@@ -1,4 +1,6 @@
+import { registerAgentDirectoryHooks } from "../support/agent-directory.ts";
 import type { ExtensionContext, UIPromptKind } from "@earendil-works/pi-coding-agent";
+
 import { afterEach, expect, it, vi } from "vitest";
 import * as filesystem from "node:fs/promises";
 import type { PreferenceFileSystem } from "../../src/pi/notification-preference.ts";
@@ -6,6 +8,8 @@ import { installInsomniac } from "../../index.ts";
 import { createAssertionProcess } from "../support/assertion-process.ts";
 import { installNotifications, type NotificationDependencies } from "../../src/pi/notifications.ts";
 import { createPiHost } from "../support/pi-host.ts";
+
+registerAgentDirectoryHooks();
 
 const prompt = (type: "ui_prompt_start" | "ui_prompt_end", kind: UIPromptKind = "confirm") =>
   ({ type, reason: "ui_prompt", kind, title: "secret command and dialog" }) as const;

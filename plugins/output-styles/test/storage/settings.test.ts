@@ -1,9 +1,11 @@
+import filesystem from "node:fs/promises";
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OUTPUT_STYLE_KEY, readPersistedStyleName, writePersistedStyleName } from "../../src/storage/settings.js";
+import { controlLockRetries } from "../support/lock-retries.js";
 
 describe("settings file access", () => {
   let root: string;
@@ -15,6 +17,8 @@ describe("settings file access", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
     await rm(root, { recursive: true, force: true });
   });
 
@@ -76,9 +80,22 @@ describe("settings file access", () => {
       await mkdir(join(root, "config"));
       await writeFile(path, JSON.stringify({ [OUTPUT_STYLE_KEY]: "brief" }), "utf8");
       const release = await lockfile.lock(path, { realpath: false });
+      const nextRetry = controlLockRetries();
+      let settled = false;
+
+      const result = readPersistedStyleName(path).finally(() => {
+        settled = true;
+      });
 
       try {
-        expect(await readPersistedStyleName(path)).toEqual({ status: "failed", failure: expect.any(String) });
+        for (const delay of [20, 40, 80, 100, 100, 100, 100, 100, 100, 100]) {
+          await nextRetry(delay);
+          await vi.advanceTimersByTimeAsync(delay - 1);
+          expect(settled).toBe(false);
+          await vi.advanceTimersByTimeAsync(1);
+        }
+
+        expect(await result).toEqual({ status: "failed", failure: expect.any(String) });
       } finally {
         await release();
       }
@@ -88,13 +105,25 @@ describe("settings file access", () => {
       await mkdir(join(root, "config"));
       await writeFile(path, JSON.stringify({ [OUTPUT_STYLE_KEY]: "brief" }), "utf8");
       const release = await lockfile.lock(path, { realpath: false });
-      const releaseTimer = setTimeout(() => void release(), 150);
+      const nextRetry = controlLockRetries();
+      let settled = false;
+
+      const result = readPersistedStyleName(path).finally(() => {
+        settled = true;
+      });
 
       try {
-        expect(await readPersistedStyleName(path)).toEqual({ status: "selected", value: "brief" });
+        await nextRetry(20);
+        expect(settled).toBe(false);
+        // The lock owner commits a different value before the pending reader can acquire it.
+        await writeFile(path, JSON.stringify({ [OUTPUT_STYLE_KEY]: "terse" }), "utf8");
       } finally {
-        clearTimeout(releaseTimer);
+        await release();
       }
+
+      await vi.advanceTimersByTimeAsync(20);
+
+      expect(await result).toEqual({ status: "selected", value: "terse" });
     });
 
     it("creates nothing next to a missing settings file", async () => {
@@ -187,23 +216,49 @@ describe("settings file access", () => {
     it("waits for a concurrently held settings lock instead of interleaving", async () => {
       await writePersistedStyleName(path, "brief");
       const release = await lockfile.lock(path, { realpath: false });
-      const releaseTimer = setTimeout(() => void release(), 150);
+      const nextRetry = controlLockRetries();
+      let settled = false;
+
+      const result = writePersistedStyleName(path, "terse").finally(() => {
+        settled = true;
+      });
 
       try {
-        await writePersistedStyleName(path, "terse");
+        await nextRetry(20);
+        expect(settled).toBe(false);
+        expect(await readFile(path, "utf8")).toBe(JSON.stringify({ [OUTPUT_STYLE_KEY]: "brief" }, null, 2));
+        await writeFile(path, JSON.stringify({ theme: "dark", [OUTPUT_STYLE_KEY]: "brief" }), "utf8");
       } finally {
-        clearTimeout(releaseTimer);
+        await release();
       }
 
-      expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ [OUTPUT_STYLE_KEY]: "terse" });
+      await vi.advanceTimersByTimeAsync(20);
+      await result;
+
+      expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ theme: "dark", [OUTPUT_STYLE_KEY]: "terse" });
     });
 
     it("fails instead of writing when the settings lock stays held", async () => {
       await writePersistedStyleName(path, "brief");
       const release = await lockfile.lock(path, { realpath: false });
+      const nextRetry = controlLockRetries();
+      let settled = false;
+
+      const result = writePersistedStyleName(path, "terse")
+        .catch((error: Error) => error)
+        .finally(() => {
+          settled = true;
+        });
 
       try {
-        await expect(writePersistedStyleName(path, "terse")).rejects.toThrow();
+        for (const delay of [20, 40, 80, 100, 100, 100, 100, 100, 100, 100]) {
+          await nextRetry(delay);
+          await vi.advanceTimersByTimeAsync(delay - 1);
+          expect(settled).toBe(false);
+          await vi.advanceTimersByTimeAsync(1);
+        }
+
+        expect(await result).toBeInstanceOf(Error);
       } finally {
         await release();
       }
@@ -211,7 +266,53 @@ describe("settings file access", () => {
       expect(JSON.parse(await readFile(path, "utf8"))).toEqual({ [OUTPUT_STYLE_KEY]: "brief" });
     });
 
-    it("leaves no temporary file behind, a failed write included", async () => {
+    it("preserves the original settings and removes the temporary file after rename fails", async () => {
+      await mkdir(join(root, "config"));
+      const original = '{"theme":"dark","outputStyle":"brief"}\n';
+      await writeFile(path, original, "utf8");
+      const failure = new Error("rename denied");
+      vi.spyOn(filesystem, "rename").mockRejectedValueOnce(failure);
+
+      await expect(writePersistedStyleName(path, "terse")).rejects.toBe(failure);
+
+      expect(await readFile(path, "utf8")).toBe(original);
+      expect(await readdir(join(root, "config"))).toEqual(["settings.json"]);
+    });
+
+    it("commits a queued write after its predecessor fails", async () => {
+      await writePersistedStyleName(path, "brief");
+      const failure = new Error("rename denied");
+      vi.spyOn(filesystem, "rename").mockRejectedValueOnce(failure);
+
+      const failed = writePersistedStyleName(path, "terse");
+      const queued = writePersistedStyleName(path, "explanatory");
+
+      expect(await Promise.allSettled([failed, queued])).toEqual([
+        { status: "rejected", reason: failure },
+        { status: "fulfilled", value: undefined },
+      ]);
+      expect(await readPersistedStyleName(path)).toEqual({ status: "selected", value: "explanatory" });
+      expect(await readdir(join(root, "config"))).toEqual(["settings.json"]);
+    });
+
+    it("preserves the original settings and removes a partially written temporary file", async () => {
+      await mkdir(join(root, "config"));
+      const original = '{"theme":"dark","outputStyle":"brief"}\n';
+      await writeFile(path, original, "utf8");
+      const realWriteFile = filesystem.writeFile;
+      const failure = new Error("disk full");
+      vi.spyOn(filesystem, "writeFile").mockImplementationOnce(async (temporaryPath) => {
+        await realWriteFile(temporaryPath, "partial JSON", "utf8");
+        throw failure;
+      });
+
+      await expect(writePersistedStyleName(path, "terse")).rejects.toBe(failure);
+
+      expect(await readFile(path, "utf8")).toBe(original);
+      expect(await readdir(join(root, "config"))).toEqual(["settings.json"]);
+    });
+
+    it("leaves no temporary file behind when reading existing settings fails", async () => {
       await writePersistedStyleName(path, "brief");
       // A directory at the target path fails the read step of the next write.
       await rm(path);

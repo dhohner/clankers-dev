@@ -97,6 +97,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Test
         run: pnpm test:ts:uncovered
+      - name: Test all plugins with worker reuse
+        run: pnpm test:ts:reuse
 
   python-lint:
     needs: changes

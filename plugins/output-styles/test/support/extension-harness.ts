@@ -297,16 +297,16 @@ export function createHarness(
   };
 }
 
-// Importing this module registers the hooks, so every importing file gets a fresh temporary root per
-// test and no file depends on state another file leaves behind. The vitest configuration shuffles
-// both the file order and the test order, which makes that isolation a requirement.
-beforeEach(async () => {
-  root = await mkdtemp(join(tmpdir(), "output-styles-extension-"));
-  bundledDir = join(root, "bundled");
-  agentDir = join(root, "agent");
-  cwd = join(root, "project");
-});
+// Each suite that uses the harness registers its hooks, even when Vitest caches this module.
+export function registerHarnessHooks(): void {
+  beforeEach(async () => {
+    root = await mkdtemp(join(tmpdir(), "output-styles-extension-"));
+    bundledDir = join(root, "bundled");
+    agentDir = join(root, "agent");
+    cwd = join(root, "project");
+  });
 
-afterEach(async () => {
-  await rm(root, { recursive: true, force: true });
-});
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+}

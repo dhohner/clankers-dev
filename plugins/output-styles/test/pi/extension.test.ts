@@ -4,7 +4,15 @@ import { describe, expect, it, vi } from "vitest";
 import outputStyles from "../../index.ts";
 import { SETTINGS_FILE_NAME, readPersistedStyleName } from "../../src/storage/settings.ts";
 import { parseStyleFile } from "../../src/styles/style-file.ts";
-import { agentDir, CHAINED_PROMPT, createHarness, styleStatus } from "../support/extension-harness.ts";
+import {
+  registerHarnessHooks,
+  agentDir,
+  CHAINED_PROMPT,
+  createHarness,
+  styleStatus,
+} from "../support/extension-harness.ts";
+
+registerHarnessHooks();
 
 describe("host bootstrap", () => {
   it("resolves bundled assets and the host agent directory through the default export", async () => {

@@ -2,6 +2,7 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    isolate: false,
     name: { label: "insomniac", color: "magenta" },
     allowOnly: false,
     setupFiles: ["./test/support/isolated-agent.ts"],

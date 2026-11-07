@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STYLES_DIR_NAME } from "../../src/pi/registration.js";
 import { OUTPUT_STYLE_KEY, SETTINGS_FILE_NAME } from "../../src/storage/settings.js";
 import {
+  registerHarnessHooks,
   agentDir,
   CHAINED_PROMPT,
   CONFIG_DIR_NAME,
@@ -12,6 +13,8 @@ import {
   styleFile,
   writeStyle,
 } from "../support/extension-harness.js";
+
+registerHarnessHooks();
 
 describe("modes without a user interface", () => {
   let stderrLines: string[];

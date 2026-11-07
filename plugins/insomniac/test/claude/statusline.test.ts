@@ -1,5 +1,6 @@
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -114,7 +115,7 @@ async function waitFor(condition: () => boolean): Promise<void> {
 
 type RunOptions = { via?: "direct" | "nested"; env?: Record<string, string> };
 
-async function runStatusLine(
+async function runProcessStatusLine(
   child: "caffeinate" | "decoy" | "detached" | "none",
   payload = session(),
   { via = "direct", env = {} }: RunOptions = {},
@@ -141,77 +142,125 @@ async function runStatusLine(
   return { text: plain(raw), raw, status: Number(lines.at(-1)!.replace("exit ", "")) };
 }
 
-beforeAll(() => {
-  buildDir = mkdtempSync(join(tmpdir(), "insomniac-stub-"));
-  stubBinary = join(buildDir, "caffeinate");
-  writeFileSync(`${stubBinary}.c`, STUB_CAFFEINATE_SOURCE);
-  const build = spawnSync("cc", ["-o", stubBinary, `${stubBinary}.c`], { encoding: "utf8" });
-
-  if (build.status !== 0) throw new Error(`building the caffeinate stub needs a C compiler: ${build.stderr}`);
-  writeFileSync(join(buildDir, "harness.sh"), HARNESS_SOURCE);
-  chmodSync(join(buildDir, "harness.sh"), 0o755);
-});
-
-afterAll(() => {
-  rmSync(buildDir, { recursive: true, force: true });
-});
-
-beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), "insomniac-test-"));
-  stubLog = join(root, "stub.log");
-});
-
-afterEach(() => {
-  for (const pid of stubPids()) {
-    try {
-      process.kill(pid, "SIGTERM");
-    } catch {
-      // Already gone.
+// Formatting cases run the real script with a fixed process table in the same shell.
+// Process ownership and ancestry are checked separately through runProcessStatusLine.
+async function runStatusLine(
+  state: "caffeinate" | "none",
+  payload = session(),
+  { env = {} }: Pick<RunOptions, "env"> = {},
+) {
+  const child = spawn(
+    "sh",
+    [
+      "-c",
+      `
+    ps() {
+      printf '%s 100 /bin/sh\\n100 1 /session\\n' "$$"
+      if [ "$TEST_SLEEP_STATE" = caffeinate ]; then printf '101 100 /usr/bin/caffeinate\\n'; fi
     }
-  }
-
-  rmSync(root, { recursive: true, force: true });
-});
-
-it("shows the Mac staying awake while Claude Code runs caffeinate", async () => {
-  const result = await runStatusLine("caffeinate");
-
-  expect(result).toMatchObject({ text: "☕ awake", status: 0 });
-});
-
-it("finds caffeinate when Claude Code runs the status line through a shell", async () => {
-  const result = await runStatusLine("caffeinate", session(), { via: "nested" });
-
-  expect(result).toMatchObject({ text: "☕ awake", status: 0 });
-});
-
-it("shows that the Mac can sleep without caffeinate", async () => {
-  const result = await runStatusLine("none");
-
-  expect(result).toMatchObject({ text: "💤 can sleep", status: 0 });
-});
-
-it("ignores a non-caffeinate process whose arguments mention caffeinate", async () => {
-  const result = await runStatusLine("decoy");
-
-  expect(result).toMatchObject({ text: "💤 can sleep", status: 0 });
-});
-
-// Launchd adopts every detached process, so detached caffeinate children belong to other programs.
-it("ignores a detached caffeinate that belongs to another program", async () => {
-  const result = await runStatusLine("detached");
-
-  expect(stubPids()).toHaveLength(1);
-  expect(result).toMatchObject({ text: "💤 can sleep", status: 0 });
-});
-
-it("shows the model, effort, context usage, and sleep state", async () => {
-  const result = await runStatusLine(
-    "caffeinate",
-    session({ model: { id: "claude-opus-5", display_name: "Opus 5" }, effort: { level: "high" }, ...contextUsed(38) }),
+    . "$STATUSLINE"
+  `,
+    ],
+    {
+      env: { PATH: process.env.PATH, STATUSLINE: SCRIPT, TEST_SLEEP_STATE: state, ...env },
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 3000,
+    },
   );
 
-  expect(result).toMatchObject({ text: "Opus 5 · high · ━━━━━━━╸──────────── 38% 76k/200k · ☕ awake", status: 0 });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (data) => {
+    stdout += data;
+  });
+  child.stderr.on("data", (data) => {
+    stderr += data;
+  });
+  child.stdin.end(payload);
+  const [status] = await once(child, "close");
+  expect(status, stderr).toBe(0);
+  const raw = stdout.trimEnd();
+
+  return { text: plain(raw), raw, status };
+}
+
+describe("process ownership", () => {
+  beforeAll(() => {
+    buildDir = mkdtempSync(join(tmpdir(), "insomniac-stub-"));
+    stubBinary = join(buildDir, "caffeinate");
+    writeFileSync(`${stubBinary}.c`, STUB_CAFFEINATE_SOURCE);
+    const build = spawnSync("cc", ["-o", stubBinary, `${stubBinary}.c`], { encoding: "utf8" });
+
+    if (build.status !== 0) throw new Error(`building the caffeinate stub needs a C compiler: ${build.stderr}`);
+    writeFileSync(join(buildDir, "harness.sh"), HARNESS_SOURCE);
+    chmodSync(join(buildDir, "harness.sh"), 0o755);
+  });
+
+  afterAll(() => {
+    rmSync(buildDir, { recursive: true, force: true });
+  });
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), "insomniac-test-"));
+    stubLog = join(root, "stub.log");
+  });
+
+  afterEach(() => {
+    for (const pid of stubPids()) {
+      try {
+        process.kill(pid, "SIGTERM");
+      } catch {
+        // Already gone.
+      }
+    }
+
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("shows the Mac staying awake while Claude Code runs caffeinate", async () => {
+    const result = await runProcessStatusLine("caffeinate");
+
+    expect(result).toMatchObject({ text: "☕ awake", status: 0 });
+  });
+
+  it("finds caffeinate when Claude Code runs the status line through a shell", async () => {
+    const result = await runProcessStatusLine("caffeinate", session(), { via: "nested" });
+
+    expect(result).toMatchObject({ text: "☕ awake", status: 0 });
+  });
+
+  it("shows that the Mac can sleep without caffeinate", async () => {
+    const result = await runProcessStatusLine("none");
+
+    expect(result).toMatchObject({ text: "💤 can sleep", status: 0 });
+  });
+
+  it("ignores a non-caffeinate process whose arguments mention caffeinate", async () => {
+    const result = await runProcessStatusLine("decoy");
+
+    expect(result).toMatchObject({ text: "💤 can sleep", status: 0 });
+  });
+
+  // Launchd adopts every detached process, so detached caffeinate children belong to other programs.
+  it("ignores a detached caffeinate that belongs to another program", async () => {
+    const result = await runProcessStatusLine("detached");
+
+    expect(stubPids()).toHaveLength(1);
+    expect(result).toMatchObject({ text: "💤 can sleep", status: 0 });
+  });
+
+  it("shows the model, effort, context usage, and sleep state", async () => {
+    const result = await runProcessStatusLine(
+      "caffeinate",
+      session({
+        model: { id: "claude-opus-5", display_name: "Opus 5" },
+        effort: { level: "high" },
+        ...contextUsed(38),
+      }),
+    );
+
+    expect(result).toMatchObject({ text: "Opus 5 · high · ━━━━━━━╸──────────── 38% 76k/200k · ☕ awake", status: 0 });
+  });
 });
 
 // Each of the 20 cells represents 5% of the context window. A half cell represents at least 2.5% more.

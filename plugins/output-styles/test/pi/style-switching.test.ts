@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { COMMAND_NAME, CYCLE_SHORTCUT, STATUS_KEY, STYLES_DIR_NAME } from "../../src/pi/registration.js";
 import {
+  registerHarnessHooks,
   agentDir,
   bundledDir,
   CHAINED_PROMPT,
@@ -12,6 +13,8 @@ import {
   styleStatus,
   writeStyle,
 } from "../support/extension-harness.js";
+
+registerHarnessHooks();
 
 describe("in-session style switching", () => {
   async function writeUserStyles(): Promise<void> {
