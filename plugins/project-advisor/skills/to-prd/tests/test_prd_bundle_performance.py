@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from support import BUNDLE, EXAMPLE, load_example_manifest
+from support import BUNDLE, EXAMPLE, SKILL_DIR, load_example_manifest
 
 from scripts import output_validation, yaml_manifest
 from scripts.cli import bundle_commands, catalog_examples, support
@@ -90,11 +91,15 @@ class PrdBundlePerformanceTests(unittest.TestCase):
                 manifest["summary"] = summary
                 count = original(manifest)
                 self.assertEqual(count, expected_count)
-                with patch.object(
-                    support,
-                    "_count_german_candidates",
-                    wraps=original,
-                ) as counter:
+                # The example evidence names paths from the repository root.
+                with (
+                    contextlib.chdir(SKILL_DIR.parents[3]),
+                    patch.object(
+                        support,
+                        "_count_german_candidates",
+                        wraps=original,
+                    ) as counter,
+                ):
                     result = support.validation_payload(manifest, EXAMPLE)
                 root_calls = sum(call.args[0] is manifest for call in counter.call_args_list)
                 self.assertEqual(root_calls, 1)

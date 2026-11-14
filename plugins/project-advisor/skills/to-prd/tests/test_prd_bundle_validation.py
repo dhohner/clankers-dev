@@ -516,7 +516,7 @@ class PrdBundleValidationTests(unittest.TestCase):
     def test_design_tree_requires_a_known_source_and_research_evidence(self) -> None:
         unknown_source = design_tree_errors([{**DESIGN_TREE_ROOT, "source": "agent"}])
         self.assertIn(
-            "blocks.design_tree[0].source must be one of: user, research",
+            "blocks.design_tree[0].source must be one of: user, request, research",
             unknown_source,
         )
 
@@ -525,6 +525,18 @@ class PrdBundleValidationTests(unittest.TestCase):
             "blocks.design_tree[0].evidence must name at least one finding for a research answer",
             research_without_evidence,
         )
+
+        request_without_evidence = design_tree_errors([{**DESIGN_TREE_ROOT, "source": "request"}])
+        self.assertIn(
+            "blocks.design_tree[0].evidence must quote the original request for a request answer",
+            request_without_evidence,
+        )
+        quoted_request = {
+            **DESIGN_TREE_ROOT,
+            "source": "request",
+            "evidence": ["Read the configuration from environment variables."],
+        }
+        self.assertEqual(design_tree_errors([quoted_request]), "")
 
     def test_design_tree_deferred_node_must_link_an_existing_open_question(self) -> None:
         deferred = {
@@ -652,6 +664,70 @@ class PrdBundleValidationTests(unittest.TestCase):
 
         self.assertEqual(depth, document.count("NODE-"))
         self.assertIn(f"NODE-{depth:04d} Leaf (Pruned)", document)
+
+    def test_api_contract_detail_fields_validate_and_render_in_order(self) -> None:
+        manifest = base_manifest("api-heavy", ["document", "api"])
+        manifest["blocks"] = {
+            "api_contract": [
+                {
+                    "contract": "Create session",
+                    "behavior": "Returns a session token.",
+                    "request": "The client sends a user name and a password.",
+                    "checks": ["Check the rate limit.", "Check the password."],
+                    "response": "The service returns the token.",
+                    "errors": ["A wrong password returns an authentication error."],
+                    "idempotency": "A replayed request returns the first token.",
+                    "concurrency": "Parallel requests for one user create one session.",
+                },
+                {"contract": "End session", "behavior": "Revokes the token."},
+            ]
+        }
+
+        normalized = BUNDLE.validate_manifest(manifest)
+        document = BUNDLE.render_document(normalized)
+
+        self.assertEqual(
+            normalized["blocks"]["api_contract"][0]["checks"],
+            ["Check the rate limit.", "Check the password."],
+        )
+        self.assertNotIn("request", normalized["blocks"]["api_contract"][1])
+        labels = [
+            "Behavior",
+            "Request",
+            "Checks",
+            "Response",
+            "Errors",
+            "Idempotency",
+            "Concurrency",
+        ]
+        positions = [document.index(f"<dt>{label}</dt>") for label in labels]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn(
+            '<ol class="content-list"><li>Check the rate limit.</li>'
+            "<li>Check the password.</li></ol>",
+            document,
+        )
+        self.assertIn(
+            '<ul class="content-list"><li>A wrong password returns an authentication error.</li>',
+            document,
+        )
+
+    def test_api_contract_detail_fields_reject_wrong_shapes_and_other_blocks(self) -> None:
+        manifest = base_manifest("api-heavy", ["document", "api"])
+        manifest["blocks"] = {
+            "api_contract": [
+                {"contract": "C", "behavior": "B", "checks": "Check one.", "request": ["R"]}
+            ],
+            "dependencies": [{"dependency": "D", "impact": "I", "checks": ["Check one."]}],
+        }
+
+        with self.assertRaises(BUNDLE.ManifestError) as failure:
+            BUNDLE.validate_manifest(manifest)
+
+        errors = failure.exception.errors
+        self.assertIn("blocks.api_contract[0].checks must be a non-empty array of strings", errors)
+        self.assertIn("blocks.api_contract[0].request must be a non-empty string", errors)
+        self.assertIn("blocks.dependencies[0].checks is not supported for this block", errors)
 
     def test_design_tree_nodes_stay_off_the_coverage_board(self) -> None:
         manifest = design_tree_manifest(

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from support import (
     EXAMPLE,
+    SKILL_DIR,
     SOURCE_ASSETS,
     AnchorParser,
     dump_yaml,
@@ -15,6 +20,8 @@ from support import (
     run_cli_process,
     run_generator,
 )
+
+from scripts.cli import support as cli_support
 
 
 class PrdBundleCliTests(unittest.TestCase):
@@ -682,3 +689,48 @@ class PrdBundleEntrypointTests(unittest.TestCase):
                     (result.returncode, result.stdout, result.stderr),
                     (process.returncode, process.stdout, process.stderr),
                 )
+
+
+class InterpreterTests(unittest.TestCase):
+    def test_too_old_interpreter_exits_with_a_message_instead_of_a_syntax_error(self) -> None:
+        entrypoint = str(SKILL_DIR / "scripts" / "__main__.py")
+        runs = {
+            "python -m scripts": "runpy.run_module('scripts', run_name='__main__')",
+            "python scripts/__main__.py": f"runpy.run_path({entrypoint!r}, run_name='__main__')",
+        }
+        for name, run in runs.items():
+            with self.subTest(name):
+                # The guard reads sys.version_info, so a lowered value stands in for Python 3.9.
+                code = f"import runpy, sys; sys.version_info = (3, 9, 6); {run}"
+                result = subprocess.run(
+                    [sys.executable, "-c", code],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    cwd=SKILL_DIR,
+                    env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                )
+
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertIn("to-prd needs Python 3.14 or newer", result.stderr)
+                self.assertIn("is Python 3.9.6", result.stderr)
+                self.assertIn("uv run --no-project --python 3.14 python ", result.stderr)
+                self.assertNotIn("SyntaxError", result.stderr)
+
+    def test_next_commands_name_the_running_interpreter_unless_python3_is_it(self) -> None:
+        executable = Path(sys.executable).resolve()
+        cases = {
+            "python3 on PATH is the running interpreter": (str(executable), "python3 "),
+            "python3 on PATH is another interpreter": ("/usr/bin/false", f"{sys.executable} "),
+            "no python3 on PATH": (None, f"{sys.executable} "),
+        }
+        for name, (on_path, prefix) in cases.items():
+            with (
+                self.subTest(name),
+                mock.patch.object(cli_support.shutil, "which", return_value=on_path),
+            ):
+                result = run_cli("examples")
+
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn(f'  - "{prefix}scripts/__main__.py', result.stdout)

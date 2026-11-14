@@ -62,6 +62,7 @@ FIVE_CHOICES_ROUND = {
         *ROUND_ONE["questions"],
         {
             "node": "NODE-05",
+            "parent": "NODE-02",
             "label": "Queue",
             "question": "Where do submits wait?",
             "multi_select": False,
@@ -103,12 +104,15 @@ FIVE_CHOICES_SUBMIT = {
 
 # Written by hand from the task contract, so a change in the payload shows up here.
 FIVE_CHOICES_ANSWERS = """\
-instructions: "Write each answer record to the design_tree node with the same NODE id. \
+instructions: "Write each answer record as the design_tree node with the same NODE id. \
+Put the node in the children of the parent node, or at the root when parent is null. \
 For a deferred node, add the open_question text as a new open_questions entry with a new id, \
-and list that id in the node relates_to."
+and list that id in the node relates_to. \
+When a written answer adds scope that no option offered, confirm it in the next round."
 comment: "Good round, thanks."
 answers[5]:
   - node: NODE-03
+    parent: null
     label: Storage
     choice: option
     selected[1]: Session directory
@@ -122,6 +126,7 @@ answers[5]:
       rationale: "Write it from the note and the option description: Files next to the scratch \
 prd.yaml."
   - node: NODE-04
+    parent: null
     label: Page parts
     choice: option
     selected[2]: History,Status lamp
@@ -134,6 +139,7 @@ prd.yaml."
       answer: History; Status lamp
       rationale: "Write it from the option descriptions: Earlier rounds. Round state."
   - node: NODE-05
+    parent: NODE-02
     label: Queue
     choice: written
     selected[0]:
@@ -144,8 +150,9 @@ prd.yaml."
       status: settled
       source: user
       answer: A queue in memory.
-      rationale: Write it from the written answer.
+      rationale: The user wrote this answer and gave no reason.
   - node: NODE-06
+    parent: null
     label: Load
     choice: decide_later
     selected[0]:
@@ -158,6 +165,7 @@ prd.yaml."
 Owner: the user."
       relates_to: the id of the new open_questions entry
   - node: NODE-07
+    parent: null
     label: Theme
     choice: out_of_scope
     selected[0]:

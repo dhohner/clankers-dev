@@ -217,6 +217,21 @@ class InterviewRoundValidationTests(InterviewCliTestCase):
         def node_id_with_trailing_newline(round_: dict[str, Any]) -> None:
             round_["questions"][0]["node"] = "NODE-03\n"
 
+        def bad_parent_form(round_: dict[str, Any]) -> None:
+            round_["questions"][1]["parent"] = "node-3"
+
+        def parent_is_own_node(round_: dict[str, Any]) -> None:
+            round_["questions"][1]["parent"] = round_["questions"][1]["node"]
+
+        def list_node_id(round_: dict[str, Any]) -> None:
+            round_["questions"][0]["node"] = ["NODE-03"]
+
+        def parent_is_earlier_question_node(round_: dict[str, Any]) -> None:
+            round_["questions"][1]["parent"] = round_["questions"][0]["node"]
+
+        def parent_is_later_question_node(round_: dict[str, Any]) -> None:
+            round_["questions"][0]["parent"] = round_["questions"][1]["node"]
+
         def unknown_field(round_: dict[str, Any]) -> None:
             round_["questions"][0]["multiselect"] = True
 
@@ -250,6 +265,17 @@ class InterviewRoundValidationTests(InterviewCliTestCase):
                 "questions[0].options[1].description",
             ),
             "text recommended mark": (text_recommended, "questions[0].options[0].recommended"),
+            "bad parent form": (bad_parent_form, "questions[1].parent"),
+            "parent is the question node": (parent_is_own_node, "questions[1].parent"),
+            "NODE id that is a list": (list_node_id, "questions[0].node"),
+            "parent is an earlier question node": (
+                parent_is_earlier_question_node,
+                "questions[1].parent",
+            ),
+            "parent is a later question node": (
+                parent_is_later_question_node,
+                "questions[0].parent",
+            ),
             "unknown field": (unknown_field, "questions[0].multiselect"),
             "round id with trailing newline": (round_id_with_trailing_newline, "id"),
             "NODE id with non-ASCII digit": (node_id_with_non_ascii_digit, "questions[0].node"),
@@ -450,16 +476,21 @@ class InterviewCommandSurfaceTests(InterviewCliTestCase):
         self.assertIn("--format", faults[0]["message"])
 
     def test_parse_args_rejects_interview_group(self) -> None:
-        with contextlib.redirect_stderr(io.StringIO()), self.assertRaises(SystemExit) as caught:
-            parse_args(["interview"])
+        for argv in (["interview"], ["interview", "status", "session"]):
+            with (
+                self.subTest(argv),
+                contextlib.redirect_stderr(io.StringIO()),
+                self.assertRaises(SystemExit) as caught,
+            ):
+                parse_args(argv)
 
-        self.assertEqual(caught.exception.code, 2)
+            self.assertEqual(caught.exception.code, 2)
 
     def test_top_level_help_lists_interview_group(self) -> None:
         result = run_cli("--help")
 
         self.assertEqual(result.returncode, 0)
-        self.assertIn("interview", result.stdout)
+        self.assertRegex(result.stdout, r"(?m)^\s+interview\s+ask browser interview rounds")
 
 
 class InterviewCliProcessTests(InterviewCliTestCase):

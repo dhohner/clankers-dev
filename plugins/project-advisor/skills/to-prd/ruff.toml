@@ -8,6 +8,8 @@ extend-select = ["E", "W", "B"]
 [lint.per-file-ignores]
 # support.py puts the skill directory on sys.path before importing the scripts package.
 "tests/support.py" = ["E402"]
+# The package checks the interpreter version before importing its submodules.
+"scripts/__init__.py" = ["E402"]
 
 [lint.isort]
 section-order = [
