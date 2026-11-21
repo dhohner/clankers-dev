@@ -45,6 +45,8 @@ jobs:
               - ".github/workflows/ci.yml"
             python:
               - "plugins/project-advisor/skills/to-prd/**"
+              # The to-agent-tasks tests read its template, so any change in the skill runs them.
+              - "plugins/project-advisor/skills/to-agent-tasks/**"
               # The root package.json holds the Python scripts and the ruff version.
               - "package.json"
               - ".github/workflows/ci.yml"

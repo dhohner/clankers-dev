@@ -1,0 +1,6 @@
+# The validator runs with the system python3 in user repositories, so it targets Python 3.9.
+target-version = "py39"
+line-length = 100
+
+[lint]
+extend-select = ["E", "W", "B"]

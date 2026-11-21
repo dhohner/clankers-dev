@@ -177,6 +177,7 @@ class RepositoryDistributionTests(unittest.TestCase):
         for relative in (
             "plugins/project-advisor/skills/to-prd/bundle/assets/fonts/manrope.woff2",
             "plugins/project-advisor/skills/to-prd/examples/fixtures/document-only.yaml",
+            "plugins/project-advisor/skills/to-agent-tasks/scripts/validate_tasks.py",
             "plugins/security-guard/src/shell/command-parser.ts",
             "plugins/output-styles/styles/unslop.md",
             "plugins/task-executor/skills/implement/SKILL.md",

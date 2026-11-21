@@ -17,6 +17,7 @@
   "plugins/*/skills/*/templates/**/*",
   "plugins/*/skills/*/examples/**/*",
   "plugins/project-advisor/skills/to-prd/scripts/**/*.py",
+  "plugins/project-advisor/skills/to-agent-tasks/scripts/*.py",
   "plugins/project-advisor/skills/to-prd/bundle/**/*",
   "plugins/output-styles/package.json",
   "plugins/output-styles/index.ts",

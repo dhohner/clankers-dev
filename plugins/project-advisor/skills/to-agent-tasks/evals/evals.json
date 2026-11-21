@@ -21,10 +21,10 @@
         "Acceptance covers `REQ-04` invoice fetch failures as retryable errors that preserve page state.",
         "Validation uses existing local commands such as `npm test` or `jest`.",
         "Every task carries the executor boundary text from `references/agent-task-template.md` without narrowing or widening it.",
-        "Tasks identify material open choices without enumerating every routine implementation choice.",
+        "Tasks name each unresolved material decision as a blocker without enumerating every routine implementation choice.",
         "Tasks that change authentication, data storage, routes, or response shapes name the properties they must preserve.",
         "Tasks present no unresolved product decision as fact, and each blocker names the evidence needed for resolution.",
-        "Each task labels unsupported product or contract decisions as assumptions in the file itself, since a chat summary does not count.",
+        "Each task records every material product or contract decision that the PRD and repository leave open as a scoped blocker in the file itself, since a chat summary does not count, unless the skill first asks the user to revise the PRD.",
         "Tasks dictate no open implementation choice, including sequence, layout, algorithms, data structures, or injection style, unless they label it nonbinding.",
         "Tasks omit generic advice such as writing tests or following existing conventions.",
         "Every repository note identifies an entry point or binding contract and either settles a decision or requires more than one search.",
@@ -34,7 +34,11 @@
         "Each blocker defers only the affected behavior while the task delivers the rest, including for `REQ-03` milestones and `REQ-02` filter persistence.",
         "Tasks attribute source claims accurately without inventing any ranking, magnitude, or priority absent from the PRD.",
         "When tasks split a requirement, their combined scope covers every clause in its description.",
-        "Numeric prefixes match dependency order, so each prerequisite capability comes from a lower numbered task."
+        "Numeric prefixes match dependency order, so each prerequisite capability comes from a lower numbered task.",
+        "`action-items/agent-tasks/source-map-self-service-order-history.md` exists and gives every `id` in the PRD one row with one disposition.",
+        "No task records a decision that changes behavior, a public or persisted contract, or security as an assumption; such a decision appears as a blocker or as a question to the user.",
+        "The bundled validator, run as `python3 <skill-dir>/scripts/validate_tasks.py action-items/agent-tasks --prd <prd.yaml>`, exits with code 0 on the written tasks.",
+        "The final report names the source map, the validator result, and each missing validation tool."
       ]
     },
     {
@@ -52,7 +56,7 @@
     {
       "id": 2,
       "prompt": "The accepted PRD bundle is at inputs/prd.yaml. Break it into coding agent tasks for the repository at outputs/repo.",
-      "expected_output": "Task files for adding, tagging, and listing entries appear under action-items/agent-tasks/ in that order. Each file starts with YAML frontmatter that holds only `depends_on` and `state: pending`, and each `depends_on` list names the same tasks as the file's `Needs first` lines.",
+      "expected_output": "Task files for adding, tagging, and listing entries appear under action-items/agent-tasks/ in that order. Each file starts with YAML frontmatter that holds only `depends_on` and `state: pending`, and each `depends_on` list names the direct predecessors that the file's `Needs first` lines name. A source map gives every PRD item one disposition, and the bundled validator passes.",
       "files": [
         "`evals/inputs/setup-reading-log-eval.sh <workspace>` prepares the workspace before the run. It copies the PRD to `inputs/prd.yaml` and the fixture repository to `outputs/repo`, then commits the fixture in a new Git repository.",
         "`evals/inputs/prd-reading-log-tags.yaml` has `status: Accepted` and three requirements that form one dependency chain: `REQ-02` tags entries that `REQ-01` stores, and `REQ-03` lists tags that `REQ-02` stores.",
@@ -65,10 +69,13 @@
         "Each task file has `state: pending`.",
         "The first task of the chain, which covers `REQ-01`, has `depends_on: []`.",
         "Each `depends_on` entry of a later task is a bare file name with the `.md` extension that exists in `action-items/agent-tasks/` and has a lower numeric prefix than the task that lists it.",
-        "Each `depends_on` list names exactly the tasks whose capabilities the file's `Needs first` lines require, so the `REQ-02` task lists the `REQ-01` task and the `REQ-03` task lists the `REQ-02` task.",
+        "Each `depends_on` list names only direct predecessors, and each entry has one `Needs first` line that starts with its file name, so the `REQ-02` task lists the `REQ-01` task and the `REQ-03` task lists only the `REQ-02` task.",
         "Each later task keeps its `Needs first` lines and states each prerequisite capability contract inline.",
         "Every task carries the executor boundary text from `references/agent-task-template.md` without narrowing or widening it.",
-        "Validation uses the existing local `npm test` command."
+        "Validation uses the existing local `npm test` command.",
+        "Each Validation line names its coverage type: new-behavior coverage, regression coverage, or manual verification.",
+        "`action-items/agent-tasks/source-map-reading-log-tags.md` gives `REQ-01`, `REQ-02`, `REQ-03`, `NODE-01`, `TEST-01`, `TEST-02`, and `TEST-03` one row each, and every task appears in a row.",
+        "The bundled validator exits with code 0 on the written task directory and the PRD."
       ]
     }
   ]
