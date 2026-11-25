@@ -1,0 +1,61 @@
+schema_version: 3
+slug: "fixture-api-heavy"
+title: "API-heavy spec fixture"
+summary: Consumers need a stable readiness result without depending on internal scoring details.
+status: Draft
+initiative_type: "api-heavy"
+review_surfaces:
+  - document
+  - api
+metadata:
+  Owner: Evaluation
+blocks:
+  problem:
+    statement: "Automation consumers cannot reliably distinguish ready, caution, and blocked planning states."
+    evidence:
+      - The external response contract is the primary review boundary.
+  requirements:
+    - id: "REQ-READINESS-CONTRACT"
+      title: Stable readiness response
+      description: "Consumers receive a status, blocking gaps, cautions, and a recommended next step."
+      validation:
+        - "TEST-READINESS-CONTRACT"
+  api_contract:
+    - contract: Readiness evaluation response
+      behavior: "Returns stable product-level fields and actionable errors without exposing internal implementation details."
+      request: The client sends the planning source and the readiness profile name.
+      checks:
+        - Reject a request that names an unknown readiness profile.
+        - Reject a planning source that does not parse.
+        - Evaluate the source against the profile.
+      response: The service returns a status, the blocking gaps, the cautions, and one next step.
+      errors:
+        - An unknown profile returns a profile error with the known profile names.
+        - A source that does not parse returns a validation error with the failed line.
+      idempotency: The same source and profile always return the same result.
+      concurrency: Evaluations do not share state, so parallel requests do not affect each other.
+  failure_paths:
+    - scenario: The submitted planning source is invalid.
+      fallback: Return a concise validation failure and do not publish a partial result.
+  design_tree:
+    - id: "NODE-RESPONSE-SHAPE"
+      label: Response shape
+      question: Should the readiness response expose internal scores or a product-level status?
+      status: settled
+      answer: "A product-level status with blocking gaps, cautions, and a recommended next step."
+      source: user
+      rationale: Consumers stay stable when the internal scoring changes.
+      relates_to:
+        - "REQ-READINESS-CONTRACT"
+      children:
+        - id: "NODE-SCORE-EXPOSURE"
+          label: Score exposure
+          question: Which score fields belong in the response?
+          status: pruned
+          reason: "Score composition is an implementation choice, not a product decision."
+  testing_strategy:
+    - id: "TEST-READINESS-CONTRACT"
+      target: Readiness response
+      expected_outcome: Valid and invalid requests produce documented observable outcomes.
+      validates:
+        - "REQ-READINESS-CONTRACT"

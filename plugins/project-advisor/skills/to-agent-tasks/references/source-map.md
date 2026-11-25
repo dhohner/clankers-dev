@@ -1,15 +1,15 @@
 # Source map
 
-The source map records the disposition of every source item, so a reviewer can check that the task set covers the PRD.
-Write it to `<destination>/source-map-<slug>.md`, where `<slug>` is the `slug` of the PRD.
-When the file exists from an earlier run on the same PRD, update its rows and keep the rows of kept tasks.
+The source map records the disposition of every source item, so a reviewer can check that the task set covers the spec.
+Write it to `<destination>/source-map-<slug>.md`, where `<slug>` is the `slug` of the spec.
+When the file exists from an earlier run on the same spec, update its rows and keep the rows of kept tasks.
 
 ## Format
 
 Write one Markdown table with this header and one row per source item:
 
 ```markdown
-# Source map: <PRD title>
+# Source map: <spec title>
 
 | Source item | Disposition | Tasks | Note |
 | --- | --- | --- | --- |
@@ -28,7 +28,7 @@ Write one Markdown table with this header and one row per source item:
 
 ## Rules
 
-- Give every `REQ`, `DEC`, `RISK`, `QUESTION`, `TEST`, and `NODE` id in the PRD exactly one row.
+- Give every `REQ`, `DEC`, `RISK`, `QUESTION`, `TEST`, and `NODE` id in the spec exactly one row.
 - Add a row for each item without an `id` that affects implementation.
 - Name at least one task for an `implementation` or a `validation` item.
 - Name a task for a `blocker` item only when that task has a `Blockers` line for it.

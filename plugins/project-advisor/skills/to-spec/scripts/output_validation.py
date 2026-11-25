@@ -1,0 +1,149 @@
+"""Structural validation for generated spec bundles."""
+
+from __future__ import annotations
+
+from collections import Counter
+from dataclasses import dataclass
+from html.parser import HTMLParser
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
+
+from .manifest_types import NormalizedManifest
+from .spec import REVIEW_PAGE_BLOCKS, review_page_entity_ids
+from .validation import ManifestError, validate_manifest
+from .yaml_manifest import YamlError, loads
+
+
+class BundleValidationError(RuntimeError):
+    """Raised when a generated bundle is incomplete or internally inconsistent."""
+
+
+@dataclass(frozen=True)
+class _BundleAnalysis:
+    manifest: NormalizedManifest
+    ids: list[str]
+    fragment_links: list[str]
+
+
+class _DocumentParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.ids: list[str] = []
+        self.fragment_links: list[str] = []
+        self.raw_fragment_links: list[str] = []
+        self.local_paths: list[str] = []
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        attributes = dict(attrs)
+        identity = attributes.get("id")
+        if identity:
+            self.ids.append(identity)
+        for attribute in ("href", "src"):
+            value = attributes.get(attribute)
+            if not value:
+                continue
+            if value.startswith("#") and len(value) > 1:
+                # Inspection reports authored fragments; validation resolves decoded IDs.
+                self.raw_fragment_links.append(value[1:])
+                self.fragment_links.append(unquote(value[1:]))
+                continue
+            parsed = urlsplit(value)
+            if not parsed.scheme and not parsed.netloc and parsed.path:
+                self.local_paths.append(unquote(parsed.path))
+
+
+def _resolve_local_path(bundle: Path, value: str) -> Path:
+    candidate = (bundle / value).resolve()
+    try:
+        candidate.relative_to(bundle.resolve())
+    except ValueError as error:
+        raise BundleValidationError(
+            f"index.html references a path outside the bundle: {value}"
+        ) from error
+    return candidate
+
+
+def validate_generated_bundle(bundle: Path) -> None:
+    """Validate required files, anchors, local assets, and preserved manifest YAML."""
+    _analyze_generated_bundle(bundle)
+
+
+def _analyze_generated_bundle(bundle: Path) -> _BundleAnalysis:
+    index_path = bundle / "index.html"
+    manifest_path = bundle / "spec.yaml"
+    errors: list[str] = []
+    normalized_manifest: NormalizedManifest | None = None
+
+    index_exists = index_path.is_file()
+    if not index_exists:
+        errors.append("missing index.html")
+    if not manifest_path.is_file():
+        errors.append("missing spec.yaml")
+    else:
+        try:
+            manifest = loads(manifest_path.read_text(encoding="utf-8"))
+        except (YamlError, OSError) as error:
+            errors.append(f"spec.yaml is not readable YAML: {error}")
+        else:
+            try:
+                normalized_manifest = validate_manifest(manifest)
+            except ManifestError as error:
+                errors.append(f"spec.yaml does not match the manifest contract: {error}")
+
+    parser = _DocumentParser()
+    if index_exists:
+        try:
+            parser.feed(index_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError) as error:
+            errors.append(f"index.html is not readable UTF-8: {error}")
+        else:
+            id_counts = Counter(parser.ids)
+            if "document-title" not in id_counts:
+                errors.append("index.html is missing required document-title ID")
+            duplicates = sorted(identity for identity, count in id_counts.items() if count > 1)
+            if duplicates:
+                errors.append("index.html contains duplicate IDs: " + ", ".join(duplicates))
+            broken = sorted(set(parser.fragment_links) - id_counts.keys())
+            if broken:
+                errors.append("index.html contains broken anchors: " + ", ".join(broken))
+            if normalized_manifest is not None:
+                missing_blocks = [
+                    name
+                    for name in normalized_manifest["blocks"]
+                    if name in REVIEW_PAGE_BLOCKS and name not in id_counts
+                ]
+                if missing_blocks:
+                    errors.append(
+                        "index.html is missing rendered block section(s): "
+                        + ", ".join(missing_blocks)
+                    )
+                missing_entities = [
+                    entity_id
+                    for entity_id in review_page_entity_ids(normalized_manifest["blocks"])
+                    if entity_id not in id_counts
+                ]
+                if missing_entities:
+                    errors.append(
+                        "index.html is missing rendered entity anchor(s): "
+                        + ", ".join(missing_entities)
+                    )
+            for local_path in sorted(set(parser.local_paths)):
+                try:
+                    resolved = _resolve_local_path(bundle, local_path)
+                except BundleValidationError as error:
+                    errors.append(str(error))
+                    continue
+                if not resolved.is_file():
+                    errors.append(f"index.html references a missing asset: {local_path}")
+
+    if errors:
+        raise BundleValidationError("; ".join(errors))
+    assert normalized_manifest is not None
+    return _BundleAnalysis(normalized_manifest, parser.ids, parser.raw_fragment_links)
+
+
+__all__ = ["BundleValidationError", "validate_generated_bundle"]

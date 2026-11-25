@@ -1,7 +1,7 @@
 {
   "name": "project-advisor",
-  "version": "0.53.0",
-  "description": "Project planning skills for recommending what to build next, writing PRDs, and turning approved PRDs into Jira-ready work items or coding-agent task files.",
+  "version": "0.54.0",
+  "description": "Project planning skills for recommending what to build next, writing specs, and turning approved specs into Jira-ready work items or coding-agent task files.",
   "author": {
     "name": "dhohner",
     "url": "https://github.com/dhohner"
@@ -11,7 +11,7 @@
   "license": "MIT",
   "keywords": [
     "planning",
-    "prd",
+    "spec",
     "jira",
     "roadmap",
     "coding-agents"
@@ -19,8 +19,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Project Advisor",
-    "shortDescription": "Product planning and PRD workflow skills.",
-    "longDescription": "Packages a project-advice workflow that moves from identifying the best next product bet to writing a PRD and slicing it into Jira-ready work items or autonomous coding-agent tasks.",
+    "shortDescription": "Product planning and spec workflow skills.",
+    "longDescription": "Packages a project-advice workflow that moves from identifying the best next product bet to writing a spec and slicing it into Jira-ready work items or autonomous coding-agent tasks.",
     "developerName": "dhohner",
     "category": "Productivity",
     "capabilities": [
@@ -28,9 +28,9 @@
     ],
     "defaultPrompt": [
       "Use the next-thing skill to recommend the best next improvement for this repo.",
-      "Help me write a PRD for this feature idea using the to-prd skill.",
-      "Break this PRD into Jira-ready vertical slices with the to-issues skill.",
-      "Turn this accepted prd.yaml into self-contained implementation tasks with the to-agent-tasks skill."
+      "Help me write a spec for this feature idea using the to-spec skill.",
+      "Break this spec into Jira-ready vertical slices with the to-issues skill.",
+      "Turn this accepted spec.yaml into self-contained implementation tasks with the to-agent-tasks skill."
     ],
     "brandColor": "#0F766E"
   }

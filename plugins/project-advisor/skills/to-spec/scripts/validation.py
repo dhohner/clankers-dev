@@ -1,0 +1,606 @@
+"""Manifest validation and traceability normalization."""
+
+from __future__ import annotations
+
+from typing import Any, cast
+
+from .manifest_types import NormalizedBlocks, NormalizedManifest
+from .spec import (
+    BLOCK_SPECS,
+    CARD_DETAIL_FIELDS_BY_BLOCK,
+    CURRENT_SCHEMA_VERSION,
+    DESIGN_TREE_EXTRA_FIELDS_BY_STATUS,
+    DESIGN_TREE_NODE_FIELDS,
+    DESIGN_TREE_NODE_OPTIONAL_FIELDS,
+    DESIGN_TREE_REQUIRED_FIELDS_BY_STATUS,
+    DESIGN_TREE_SOURCES,
+    DESIGN_TREE_STATUS_FIELDS,
+    DESIGN_TREE_STATUSES,
+    ENTITY_ID_PATTERN,
+    ENTITY_OPTIONAL_FIELDS_BY_BLOCK,
+    GENERATED_METADATA_LABELS,
+    INITIATIVE_TYPES,
+    MANIFEST_FIELDS,
+    REQUIRED_SURFACES_BY_INITIATIVE,
+    REVIEW_SURFACES,
+    SCHEMA_VERSIONS,
+    SLUG_PATTERN,
+    entity_label,
+    normalize_entity_id,
+)
+
+# Design tree sources whose answers must carry evidence, mapped to what the evidence must hold.
+EVIDENCE_REQUIRED_BY_SOURCE = {
+    "research": "name at least one finding for a research answer",
+    "request": "quote the original request for a request answer",
+}
+
+
+class ManifestError(ValueError):
+    """Raised when a manifest does not satisfy the version it declares."""
+
+    def __init__(self, errors: list[str] | str) -> None:
+        if isinstance(errors, str):
+            self.errors = [line.removeprefix("- ") for line in errors.splitlines() if line.strip()]
+            super().__init__(errors)
+        else:
+            self.errors = errors
+            super().__init__("\n".join(f"- {message}" for message in self.errors))
+
+
+def _non_empty_string(value: Any, path: str, errors: list[str]) -> str:
+    if not isinstance(value, str) or not value.strip():
+        errors.append(f"{path} must be a non-empty string")
+        return ""
+    return value.strip()
+
+
+def _string_list(value: Any, path: str, errors: list[str]) -> list[str]:
+    if not isinstance(value, list) or not value:
+        errors.append(f"{path} must be a non-empty array of strings")
+        return []
+    result: list[str] = []
+    for index, item in enumerate(value):
+        text = _non_empty_string(item, f"{path}[{index}]", errors)
+        if text:
+            result.append(text)
+    return result
+
+
+def _reject_unknown_fields(
+    value: dict[str, Any],
+    allowed: set[str],
+    path: str,
+    errors: list[str],
+) -> None:
+    for field in sorted(set(value) - allowed):
+        errors.append(f"{path}.{field} is not supported for this block")
+
+
+def _object_list(
+    value: Any,
+    path: str,
+    fields: tuple[str, ...],
+    errors: list[str],
+    optional_fields: set[str] | None = None,
+    detail_fields: dict[str, str] | None = None,
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list) or not value:
+        errors.append(f"{path} must be a non-empty array")
+        return []
+    result: list[dict[str, Any]] = []
+    optional_fields = optional_fields or set()
+    detail_fields = detail_fields or {}
+    allowed_fields = set(fields) | optional_fields | set(detail_fields)
+    if "id" in optional_fields:
+        allowed_fields.add("label")
+    for index, item in enumerate(value):
+        item_path = f"{path}[{index}]"
+        if not isinstance(item, dict):
+            errors.append(f"{item_path} must be an object")
+            continue
+        _reject_unknown_fields(item, allowed_fields, item_path, errors)
+        normalized: dict[str, Any] = {
+            field: _non_empty_string(item.get(field), f"{item_path}.{field}", errors)
+            for field in fields
+        }
+        if "id" in optional_fields and "id" in item:
+            normalized["id"] = _non_empty_string(item.get("id"), f"{item_path}.id", errors)
+        for list_field in ("relates_to", "validates", "validation", "evidence"):
+            if list_field in optional_fields and list_field in item:
+                value = item.get(list_field)
+                normalized[list_field] = (
+                    []
+                    if value == []
+                    else _string_list(
+                        value,
+                        f"{item_path}.{list_field}",
+                        errors,
+                    )
+                )
+        if "exception" in optional_fields and "exception" in item:
+            normalized["exception"] = _non_empty_string(
+                item.get("exception"),
+                f"{item_path}.exception",
+                errors,
+            )
+        for field, shape in detail_fields.items():
+            if field not in item:
+                continue
+            field_path = f"{item_path}.{field}"
+            normalized[field] = (
+                _non_empty_string(item[field], field_path, errors)
+                if shape == "text"
+                else _string_list(item[field], field_path, errors)
+            )
+        result.append(normalized)
+    return result
+
+
+def _tree_allowed_fields(status: str) -> set[str]:
+    known = set(DESIGN_TREE_NODE_FIELDS) | set(DESIGN_TREE_NODE_OPTIONAL_FIELDS)
+    if status not in DESIGN_TREE_STATUSES:
+        # The status itself is already reported; listing every status field as
+        # allowed keeps one broken node from raising a second wave of errors.
+        return known | DESIGN_TREE_STATUS_FIELDS
+    return (
+        known
+        | set(DESIGN_TREE_REQUIRED_FIELDS_BY_STATUS[status])
+        | set(DESIGN_TREE_EXTRA_FIELDS_BY_STATUS[status])
+    )
+
+
+def _reject_unsupported_node_fields(
+    item: dict[str, Any],
+    status: str,
+    path: str,
+    errors: list[str],
+) -> None:
+    for field in sorted(set(item) - _tree_allowed_fields(status)):
+        if field in DESIGN_TREE_STATUS_FIELDS:
+            errors.append(f"{path}.{field} is not supported for a {status} node")
+        else:
+            errors.append(f"{path}.{field} is not supported for this block")
+
+
+def _is_tree_node_list(value: Any, path: str, errors: list[str]) -> bool:
+    if isinstance(value, list) and value:
+        return True
+    errors.append(f"{path} must be a non-empty array of design tree nodes")
+    return False
+
+
+def _validate_tree_node(item: Any, path: str, errors: list[str]) -> dict[str, Any]:
+    if not isinstance(item, dict):
+        errors.append(f"{path} must be an object")
+        return {}
+    status = _non_empty_string(item.get("status"), f"{path}.status", errors)
+    if status and status not in DESIGN_TREE_STATUSES:
+        errors.append(f"{path}.status must be one of: " + ", ".join(DESIGN_TREE_STATUSES))
+        status = ""
+    _reject_unsupported_node_fields(item, status, path, errors)
+
+    node: dict[str, Any] = {
+        field: _non_empty_string(item.get(field), f"{path}.{field}", errors)
+        for field in DESIGN_TREE_NODE_FIELDS
+    }
+    node["status"] = status
+    for field in DESIGN_TREE_REQUIRED_FIELDS_BY_STATUS.get(status, ()):
+        node[field] = _non_empty_string(item.get(field), f"{path}.{field}", errors)
+    for field in DESIGN_TREE_EXTRA_FIELDS_BY_STATUS.get(status, ()):
+        if field in item:
+            node[field] = _non_empty_string(item.get(field), f"{path}.{field}", errors)
+    if status == "settled" and node["source"] and node["source"] not in DESIGN_TREE_SOURCES:
+        errors.append(f"{path}.source must be one of: " + ", ".join(DESIGN_TREE_SOURCES))
+
+    for list_field in ("relates_to", "evidence"):
+        if list_field in item:
+            raw = item.get(list_field)
+            node[list_field] = (
+                []
+                if raw == []
+                else _string_list(
+                    raw,
+                    f"{path}.{list_field}",
+                    errors,
+                )
+            )
+    if (need := EVIDENCE_REQUIRED_BY_SOURCE.get(node.get("source"))) and not node.get("evidence"):
+        errors.append(f"{path}.evidence must {need}")
+    return node
+
+
+def _validate_tree_nodes(value: Any, path: str, errors: list[str]) -> list[dict[str, Any]]:
+    """Validate a design tree depth-first without recursing on author input."""
+    roots: list[dict[str, Any]] = []
+    if not _is_tree_node_list(value, path, errors):
+        return roots
+    pending: list[tuple[Any, str, list[dict[str, Any]]]] = [
+        (item, f"{path}[{index}]", roots) for index, item in enumerate(value)
+    ]
+    pending.reverse()
+    while pending:
+        item, item_path, siblings = pending.pop()
+        node = _validate_tree_node(item, item_path, errors)
+        siblings.append(node)
+        if not isinstance(item, dict) or "children" not in item:
+            continue
+        children_path = f"{item_path}.children"
+        node["children"] = []
+        if not _is_tree_node_list(item["children"], children_path, errors):
+            continue
+        pending.extend(
+            (child, f"{children_path}[{index}]", node["children"])
+            for index, child in reversed(list(enumerate(item["children"])))
+        )
+    return roots
+
+
+def _iter_tree_node_paths(
+    nodes: list[dict[str, Any]],
+    path: str,
+) -> list[tuple[str, dict[str, Any]]]:
+    entries: list[tuple[str, dict[str, Any]]] = []
+    pending: list[tuple[str, dict[str, Any]]] = [
+        (f"{path}[{index}]", node) for index, node in enumerate(nodes)
+    ]
+    pending.reverse()
+    while pending:
+        node_path, node = pending.pop()
+        entries.append((node_path, node))
+        children = node.get("children", [])
+        pending.extend(
+            (f"{node_path}.children[{index}]", child)
+            for index, child in reversed(list(enumerate(children)))
+        )
+    return entries
+
+
+def _validate_block(name: str, value: Any, errors: list[str]) -> Any:
+    spec = BLOCK_SPECS[name]
+    path = f"blocks.{name}"
+    if spec.kind == "summary":
+        if not isinstance(value, dict):
+            errors.append(f"{path} must be an object")
+            return {"metrics": [], "recommendation": ""}
+        _reject_unknown_fields(value, {"metrics", "recommendation"}, path, errors)
+        return {
+            "metrics": _object_list(
+                value.get("metrics"),
+                f"{path}.metrics",
+                ("label", "value", "description"),
+                errors,
+            ),
+            "recommendation": _non_empty_string(
+                value.get("recommendation"),
+                f"{path}.recommendation",
+                errors,
+            ),
+        }
+    if spec.kind == "cards":
+        optional_fields = ENTITY_OPTIONAL_FIELDS_BY_BLOCK.get(name)
+        detail_fields = CARD_DETAIL_FIELDS_BY_BLOCK.get(name)
+        return _object_list(value, path, spec.fields, errors, optional_fields, detail_fields)
+    if spec.kind == "list":
+        return _string_list(value, path, errors)
+    if spec.kind == "questions":
+        if not isinstance(value, list) or not value:
+            errors.append(f"{path} must be a non-empty array of strings or question objects")
+            return []
+        questions: list[dict[str, Any]] = []
+        for index, item in enumerate(value):
+            item_path = f"{path}[{index}]"
+            if isinstance(item, str):
+                text = _non_empty_string(item, item_path, errors)
+                questions.append({"question": text})
+                continue
+            if not isinstance(item, dict):
+                errors.append(f"{item_path} must be a string or object")
+                continue
+            _reject_unknown_fields(
+                item, {"id", "label", "question", "relates_to", "evidence"}, item_path, errors
+            )
+            normalized: dict[str, Any] = {
+                "question": _non_empty_string(item.get("question"), f"{item_path}.question", errors)
+            }
+            if "id" in item:
+                normalized["id"] = _non_empty_string(item.get("id"), f"{item_path}.id", errors)
+            for list_field in ("relates_to", "evidence"):
+                if list_field in item:
+                    value = item.get(list_field)
+                    normalized[list_field] = (
+                        []
+                        if value == []
+                        else _string_list(
+                            value,
+                            f"{item_path}.{list_field}",
+                            errors,
+                        )
+                    )
+            questions.append(normalized)
+        return questions
+    if spec.kind == "problem":
+        if not isinstance(value, dict):
+            errors.append(f"{path} must be an object")
+            return {"statement": "", "evidence": []}
+        _reject_unknown_fields(value, {"statement", "evidence"}, path, errors)
+        return {
+            "statement": _non_empty_string(value.get("statement"), f"{path}.statement", errors),
+            "evidence": _string_list(value.get("evidence"), f"{path}.evidence", errors),
+        }
+    if spec.kind == "scope":
+        if not isinstance(value, dict):
+            errors.append(f"{path} must be an object")
+            return {"in": [], "out": []}
+        _reject_unknown_fields(value, {"in", "out"}, path, errors)
+        return {
+            "in": _string_list(value.get("in"), f"{path}.in", errors),
+            "out": _string_list(value.get("out"), f"{path}.out", errors),
+        }
+    if spec.kind == "table":
+        if not isinstance(value, dict):
+            errors.append(f"{path} must be an object")
+            return {"columns": [], "rows": []}
+        _reject_unknown_fields(value, {"columns", "rows"}, path, errors)
+        columns = _string_list(value.get("columns"), f"{path}.columns", errors)
+        rows = value.get("rows")
+        normalized_rows: list[list[str]] = []
+        if not isinstance(rows, list) or not rows:
+            errors.append(f"{path}.rows must be a non-empty array of row arrays")
+        else:
+            for row_index, row in enumerate(rows):
+                row_path = f"{path}.rows[{row_index}]"
+                if not isinstance(row, list):
+                    errors.append(f"{row_path} must be an array")
+                    continue
+                if len(row) != len(columns):
+                    errors.append(
+                        f"{row_path} must contain {len(columns)} values to match {path}.columns"
+                    )
+                normalized_rows.append(
+                    [
+                        _non_empty_string(cell, f"{row_path}[{cell_index}]", errors)
+                        for cell_index, cell in enumerate(row)
+                    ]
+                )
+        return {"columns": columns, "rows": normalized_rows}
+    if spec.kind == "code":
+        return _object_list(value, path, ("reference", "language", "code", "annotation"), errors)
+    if spec.kind == "tree":
+        return _validate_tree_nodes(value, path, errors)
+    raise RuntimeError(f"unsupported renderer kind: {spec.kind}")
+
+
+def _assign_and_validate_traceability(blocks: dict[str, Any], errors: list[str]) -> None:
+    entity_ids: dict[str, str] = {}
+    validation_links: dict[str, set[str]] = {}
+    requirements: list[dict[str, Any]] = []
+
+    for block_name, items in blocks.items():
+        spec = BLOCK_SPECS[block_name]
+        if not spec.id_prefix or not spec.label_prefix or spec.kind == "tree":
+            continue
+        for index, item in enumerate(items, start=1):
+            default_id = f"{spec.id_prefix}-{index:02d}"
+            entity_id = normalize_entity_id(item.get("id", default_id))
+            item["id"] = entity_id
+            item["label"] = entity_label(entity_id)
+            if not ENTITY_ID_PATTERN.fullmatch(entity_id) or not entity_id.startswith(
+                f"{spec.id_prefix}-"
+            ):
+                errors.append(
+                    f"blocks.{block_name}[{index - 1}].id must look like "
+                    f"{spec.label_prefix}-01 and use the {spec.id_prefix} prefix"
+                )
+            if entity_id in entity_ids:
+                errors.append(f"duplicate entity id: {entity_id}")
+            else:
+                entity_ids[entity_id] = f"blocks.{block_name}[{index - 1}]"
+            item.setdefault("relates_to", [])
+            item.setdefault("evidence", [])
+            if block_name == "requirements":
+                requirements.append(item)
+            if block_name == "testing_strategy":
+                for requirement_id in item.get("validates", []):
+                    normalized_requirement_id = normalize_entity_id(requirement_id)
+                    validation_links.setdefault(normalized_requirement_id, set()).add(entity_id)
+
+    tree_nodes: list[tuple[str, dict[str, Any]]] = []
+    for block_name, items in blocks.items():
+        spec = BLOCK_SPECS[block_name]
+        if spec.kind != "tree":
+            continue
+        for node_path, node in _iter_tree_node_paths(items, f"blocks.{block_name}"):
+            node_id = normalize_entity_id(node.get("id", ""))
+            if not node_id:
+                continue
+            node["id"] = node_id
+            if not ENTITY_ID_PATTERN.fullmatch(node_id) or not node_id.startswith(
+                f"{spec.id_prefix}-"
+            ):
+                errors.append(
+                    f"{node_path}.id must look like {spec.label_prefix}-01 "
+                    f"and use the {spec.id_prefix} prefix"
+                )
+            if node_id in entity_ids:
+                errors.append(f"duplicate entity id: {node_id}")
+            else:
+                entity_ids[node_id] = node_path
+            tree_nodes.append((node_path, node))
+
+    for block_name, items in blocks.items():
+        spec = BLOCK_SPECS[block_name]
+        if not spec.id_prefix or spec.kind == "tree":
+            continue
+        for index, item in enumerate(items, start=1):
+            item_path = f"blocks.{block_name}[{index - 1}]"
+            for field in ("relates_to", "validates", "validation"):
+                normalized_refs = []
+                for reference in item.get(field, []):
+                    reference_id = normalize_entity_id(reference)
+                    normalized_refs.append(reference_id)
+                    if reference_id not in entity_ids:
+                        errors.append(
+                            f"{item_path}.{field} references missing entity id: {reference}"
+                        )
+                    if (
+                        block_name == "requirements"
+                        and field == "validation"
+                        and not reference_id.startswith("test-")
+                    ):
+                        errors.append(
+                            f"{item_path}.validation must reference a TEST entity id: {reference}"
+                        )
+                    if (
+                        block_name == "testing_strategy"
+                        and field == "validates"
+                        and not reference_id.startswith("req-")
+                    ):
+                        errors.append(
+                            f"{item_path}.validates must reference a REQ entity id: {reference}"
+                        )
+                if field in item:
+                    item[field] = normalized_refs
+
+    for node_path, node in tree_nodes:
+        references: list[str] = []
+        for reference in node.get("relates_to", []):
+            reference_id = normalize_entity_id(reference)
+            references.append(reference_id)
+            if reference_id not in entity_ids:
+                errors.append(f"{node_path}.relates_to references missing entity id: {reference}")
+        if "relates_to" in node:
+            node["relates_to"] = references
+        if node.get("status") == "deferred" and not any(
+            reference.startswith("question-") and reference in entity_ids
+            for reference in references
+        ):
+            errors.append(
+                f"{node_path}.relates_to must name an open question id for a deferred node"
+            )
+
+    for requirement in requirements:
+        requirement_id = requirement["id"]
+        linked_tests = {
+            normalize_entity_id(reference) for reference in requirement.get("validation", [])
+        } | validation_links.get(requirement_id, set())
+        requirement["validation"] = sorted(linked_tests)
+        if not linked_tests and not requirement.get("exception"):
+            errors.append(
+                f"{entity_ids.get(requirement_id, requirement_id)} must connect to "
+                "a validation outcome or include an exception"
+            )
+
+
+def _manifest_version(value: Any, errors: list[str]) -> int | None:
+    """Return the declared manifest version, or None when it is unusable."""
+    if not isinstance(value, int) or isinstance(value, bool) or value not in SCHEMA_VERSIONS:
+        errors.append(f"schema_version must be the number {CURRENT_SCHEMA_VERSION}")
+        return None
+    return value
+
+
+def validate_manifest(raw: Any) -> NormalizedManifest:
+    errors: list[str] = []
+    if not isinstance(raw, dict):
+        raise ManifestError("manifest must be a YAML mapping")
+
+    for field in sorted(set(raw) - MANIFEST_FIELDS):
+        errors.append(f"{field} is not a supported manifest field")
+
+    schema_version = _manifest_version(raw.get("schema_version"), errors)
+
+    slug = _non_empty_string(raw.get("slug"), "slug", errors)
+    if slug and not SLUG_PATTERN.fullmatch(slug):
+        errors.append("slug must contain only lowercase letters, numbers, and single hyphens")
+
+    initiative_type = _non_empty_string(raw.get("initiative_type"), "initiative_type", errors)
+    if initiative_type and initiative_type not in INITIATIVE_TYPES:
+        errors.append("initiative_type must be one of: " + ", ".join(sorted(INITIATIVE_TYPES)))
+
+    surfaces = _string_list(raw.get("review_surfaces"), "review_surfaces", errors)
+    for index, surface in enumerate(surfaces):
+        if surface not in REVIEW_SURFACES:
+            errors.append(
+                f"review_surfaces[{index}] must be one of: " + ", ".join(sorted(REVIEW_SURFACES))
+            )
+    surface_set = set(surfaces)
+    if len(surfaces) != len(surface_set):
+        errors.append("review_surfaces must not contain duplicates")
+    required_surfaces = REQUIRED_SURFACES_BY_INITIATIVE.get(initiative_type, set())
+    missing_surfaces = sorted(required_surfaces - surface_set)
+    if missing_surfaces:
+        errors.append(
+            f"initiative_type {initiative_type} requires review_surfaces: "
+            + ", ".join(missing_surfaces)
+        )
+    if initiative_type == "mixed" and len(surface_set - {"document"}) < 2:
+        errors.append("initiative_type mixed requires at least two non-document review surfaces")
+
+    title = _non_empty_string(raw.get("title"), "title", errors)
+    summary = _non_empty_string(raw.get("summary"), "summary", errors)
+    status = _non_empty_string(raw.get("status"), "status", errors)
+
+    metadata = raw.get("metadata")
+    normalized_metadata: dict[str, str] = {}
+    if not isinstance(metadata, dict) or not metadata:
+        errors.append("metadata must be a non-empty object of string values")
+    else:
+        normalized_labels: set[str] = set()
+        for key, value in metadata.items():
+            if not isinstance(key, str) or not key.strip():
+                errors.append("metadata keys must be non-empty strings")
+                continue
+            label = key.strip()
+            normalized_label = label.casefold()
+            if normalized_label in GENERATED_METADATA_LABELS:
+                errors.append(f"metadata.{label} is reserved for generated metadata")
+                continue
+            if normalized_label in normalized_labels:
+                errors.append(f"metadata contains duplicate label after normalization: {label}")
+                continue
+            text = _non_empty_string(value, f"metadata.{key}", errors)
+            if text:
+                normalized_metadata[label] = text
+                normalized_labels.add(normalized_label)
+
+    blocks = raw.get("blocks")
+    if not isinstance(blocks, dict) or not blocks:
+        errors.append("blocks must be a non-empty object of selected spec blocks")
+        blocks = {}
+    unknown_blocks = sorted(set(blocks) - set(BLOCK_SPECS))
+    if unknown_blocks:
+        errors.append(
+            "blocks contains unsupported block name(s): "
+            + ", ".join(unknown_blocks)
+            + "; supported names are: "
+            + ", ".join(BLOCK_SPECS)
+        )
+    validated_blocks = {
+        name: _validate_block(name, blocks[name], errors) for name in BLOCK_SPECS if name in blocks
+    }
+    _assign_and_validate_traceability(validated_blocks, errors)
+    # Each block validator returns the shape its spec kind declares, and
+    # traceability has now assigned every entity id, label, and reference list.
+    normalized_blocks = cast(NormalizedBlocks, validated_blocks)
+    if "design_tree" not in normalized_blocks:
+        errors.append(f"blocks.design_tree is required by schema_version {CURRENT_SCHEMA_VERSION}")
+
+    if errors:
+        raise ManifestError(errors)
+    # _manifest_version records an error for every unusable version.
+    assert schema_version is not None
+    return {
+        "schema_version": schema_version,
+        "slug": slug,
+        "title": title,
+        "summary": summary,
+        "status": status,
+        "initiative_type": initiative_type,
+        "review_surfaces": surfaces,
+        "metadata": normalized_metadata,
+        "blocks": normalized_blocks,
+    }
+
+
+__all__ = ["ManifestError", "validate_manifest"]

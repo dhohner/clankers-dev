@@ -1,7 +1,7 @@
 {
   "name": "project-advisor",
-  "version": "0.53.0",
-  "description": "Project planning skills for recommending what to build next, writing PRDs, and turning approved PRDs into Jira-ready work items or coding-agent task files.",
+  "version": "0.54.0",
+  "description": "Project planning skills for recommending what to build next, writing specs, and turning approved specs into Jira-ready work items or coding-agent task files.",
   "author": {
     "name": "dhohner"
   },
@@ -9,7 +9,7 @@
   "license": "MIT",
   "keywords": [
     "planning",
-    "prd",
+    "spec",
     "jira",
     "roadmap",
     "coding-agents"

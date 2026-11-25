@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="referrer" content="no-referrer">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="oklch(13% 0.014 265)">
+    <title>Connecting · spec interview</title>
+    <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/assets/shared/base.css">
+    <link rel="stylesheet" href="/assets/interview/tokens.css">
+    <link rel="stylesheet" href="/assets/interview/styles.css">
+    <script src="/assets/interview/app.js" defer></script>
+  </head>
+  <body>
+    <header class="plot-bar">
+      <span class="brand">
+        <span class="brand-name">Project Advisor</span>
+        <span class="brand-role">Spec interview</span>
+      </span>
+      <p id="status" class="doc-status" data-state="connecting" role="status">
+        <span class="lamp" aria-hidden="true"></span>
+        <span class="sr-only">Interview status:</span>
+        <span id="status-word" class="doc-status-word">Connecting</span>
+      </p>
+    </header>
+    <main id="content" class="interview">
+      <section class="interview-current" aria-labelledby="current-title">
+        <div class="interview-intro">
+          <p id="round-label" class="round-label">Spec interview</p>
+          <h1 id="current-title">Project interview</h1>
+          <p class="interview-lede">Answer each question, then review and submit the round.</p>
+        </div>
+        <p id="current-message" class="interview-message">Connecting to the interview server.</p>
+        <div id="round"></div>
+      </section>
+      <section id="history" class="interview-history" aria-labelledby="history-title" hidden>
+        <h2 id="history-title" class="interview-section-title">Earlier rounds</h2>
+        <div id="history-list"></div>
+      </section>
+    </main>
+  </body>
+</html>

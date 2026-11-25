@@ -14,7 +14,7 @@ Create one file per slice in dependency order, using names such as `01-short-sli
 
 Mode, language, and profile arguments are independent:
 
-- `default`: full PRD or accepted `to-prd` bundle; follow [default intake](references/intake-default.md).
+- `default`: full PRD or accepted `to-spec` bundle; follow [default intake](references/intake-default.md).
 - `brief`: unpackaged requirements or scenarios; follow [brief intake](references/intake-brief.md).
 - `de` (default) or `en`: ticket language, regardless of source language.
 - `product` or `infrastructure`: ticket profile, independent of Jira issue type.

@@ -12,11 +12,11 @@ The validator already checks file names, frontmatter, sections, placeholders, th
 
 ## Evidence and autonomy
 
-- Support each binding claim with the PRD or inspected repository evidence.
+- Support each binding claim with the spec or inspected repository evidence.
 - Put each evidence-backed decision in Required behavior or Contract, once.
 - Limit Assumptions to facts nobody could verify and minor task decisions; an Assumptions line never holds a decision that changes required behavior, a public or persisted contract, security, external state, or scope, which belongs in Required behavior, Contract, or Blockers.
 - Include every product and contract decision needed for execution.
-- Make each task standalone, executable without the PRD and sibling tasks.
+- Make each task standalone, executable without the spec and sibling tasks.
 - Limit repository notes to verified entry points, binding contracts, and hidden wiring that affects decisions.
 - State prerequisite capabilities and their required contracts inline, including contracts from indirect predecessors.
 - Write each contract that several tasks state as an identical `### Shared:` block in each of them.

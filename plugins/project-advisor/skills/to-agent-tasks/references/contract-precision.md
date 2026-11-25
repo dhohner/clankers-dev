@@ -1,7 +1,7 @@
 # Contract precision pass
 
 Evaluate every applicable item for each triggered slice.
-Resolve it from PRD or repository evidence, or add a blocker with the evidence needed to resolve it.
+Resolve it from spec or repository evidence, or add a blocker with the evidence needed to resolve it.
 Keep implementation open where evidence does not fix it.
 Write one compact task clause per resolved decision.
 

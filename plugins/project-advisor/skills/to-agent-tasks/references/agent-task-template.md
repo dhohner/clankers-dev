@@ -26,7 +26,7 @@ Write `state: pending`, because only the tool that implements the task sets `sta
 
 <Keep this section only for a slice with contract risks or a contract that other tasks share.
 State each applicable data, state, replay, concurrency, atomicity, failure, and authorization decision once.
-Write only decisions that the PRD or inspected repository evidence supports.
+Write only decisions that the spec or inspected repository evidence supports.
 Put unresolved decisions under Blockers.
 Write a contract that other tasks also state as a shared block, and copy the block unchanged into every task that states it:>
 

@@ -18,21 +18,21 @@ from pathlib import Path
 SKILL_DIR = Path(__file__).resolve().parent.parent
 SCRIPT = SKILL_DIR / "scripts" / "validate_tasks.py"
 TEMPLATE = SKILL_DIR / "references" / "agent-task-template.md"
-# `to-prd generate` wrote these from evals/inputs/prd-reading-log-tags.yaml, one with a
+# `to-spec generate` wrote these from evals/inputs/spec-reading-log-tags.yaml, one with a
 # multiline REQ-01 title and one with an `id:` line inside a multiline evidence item.
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
-_spec = importlib.util.spec_from_file_location("validate_tasks", SCRIPT)
-assert _spec is not None and _spec.loader is not None
-validate_tasks = importlib.util.module_from_spec(_spec)
+_module_spec = importlib.util.spec_from_file_location("validate_tasks", SCRIPT)
+assert _module_spec is not None and _module_spec.loader is not None
+validate_tasks = importlib.util.module_from_spec(_module_spec)
 # dataclasses resolves the module through sys.modules while it builds each class.
-sys.modules[_spec.name] = validate_tasks
-_spec.loader.exec_module(validate_tasks)
+sys.modules[_module_spec.name] = validate_tasks
+_module_spec.loader.exec_module(validate_tasks)
 
 EXECUTOR = "\n".join(validate_tasks.EXECUTOR_TEXT)
 
-PRD = """\
-schema_version: 2
+SPEC = """\
+schema_version: 3
 slug: "reading-log-tags"
 title: "Reading Log Tags"
 status: Accepted
@@ -157,8 +157,8 @@ class ValidatorCase(unittest.TestCase):
         self.root = Path(temporary.name)
         self.task_dir = self.root / "agent-tasks"
         self.task_dir.mkdir()
-        self.prd = self.root / "prd.yaml"
-        self.prd.write_text(PRD, encoding="utf-8")
+        self.spec = self.root / "spec.yaml"
+        self.spec.write_text(SPEC, encoding="utf-8")
 
     def write(self, files: dict) -> None:
         """Write each file; a None value leaves that file absent."""
@@ -169,7 +169,7 @@ class ValidatorCase(unittest.TestCase):
     def run_validator(self, *extra: str):
         output = io.StringIO()
         with redirect_stdout(output):
-            code = validate_tasks.main([str(self.task_dir), "--prd", str(self.prd), *extra])
+            code = validate_tasks.main([str(self.task_dir), "--spec", str(self.spec), *extra])
         return code, output.getvalue()
 
 
@@ -249,8 +249,8 @@ class ValidTaskSetTest(ValidatorCase):
         files = valid_files()
         files["source-map-reading-log-tags.md"] += "| NODE-02 | no work | | Settled by NODE-01. |\n"
         self.write(files)
-        self.prd.write_text(
-            PRD.replace(
+        self.spec.write_text(
+            SPEC.replace(
                 "      question: Should `Fantasy` and `fantasy` count as one tag?\n",
                 "      question: Should `Fantasy` and `fantasy` count as one tag?\n"
                 "      answer: |-\n"
@@ -268,7 +268,7 @@ class ValidTaskSetTest(ValidatorCase):
     def test_runs_as_a_script_with_python3_9_compatible_code(self) -> None:
         self.write(valid_files())
         result = subprocess.run(
-            [sys.executable, "-I", str(SCRIPT), str(self.task_dir), "--prd", str(self.prd)],
+            [sys.executable, "-I", str(SCRIPT), str(self.task_dir), "--spec", str(self.spec)],
             capture_output=True,
             text=True,
             timeout=30,
@@ -279,7 +279,7 @@ class ValidTaskSetTest(ValidatorCase):
     def test_missing_directory_is_a_usage_error(self) -> None:
         errors = io.StringIO()
         with redirect_stderr(errors), self.assertRaises(SystemExit) as raised:
-            validate_tasks.main([str(self.root / "missing"), "--prd", str(self.prd)])
+            validate_tasks.main([str(self.root / "missing"), "--spec", str(self.spec)])
         self.assertEqual(raised.exception.code, 2)
         self.assertIn("is not a directory", errors.getvalue())
 
@@ -690,16 +690,16 @@ GENERATED_SOURCE_MAP = SOURCE_MAP + (
 )
 
 
-class GeneratedPrdTest(ValidatorCase):
-    def use_prd(self, fixture: str, source_map: str = GENERATED_SOURCE_MAP) -> None:
+class GeneratedSpecTest(ValidatorCase):
+    def use_spec(self, fixture: str, source_map: str = GENERATED_SOURCE_MAP) -> None:
         files = valid_files()
         files["source-map-reading-log-tags.md"] = source_map
         self.write(files)
-        self.prd.write_text((FIXTURES / fixture).read_text(encoding="utf-8"), encoding="utf-8")
+        self.spec.write_text((FIXTURES / fixture).read_text(encoding="utf-8"), encoding="utf-8")
 
     def test_a_multiline_title_keeps_the_requirement_id(self) -> None:
-        self.use_prd(
-            "prd-multiline-title.yaml",
+        self.use_spec(
+            "spec-multiline-title.yaml",
             GENERATED_SOURCE_MAP.replace(
                 "| REQ-01 | implementation | `01-add-entries.md` | |\n", ""
             ),
@@ -708,10 +708,10 @@ class GeneratedPrdTest(ValidatorCase):
         self.assertEqual(code, 1, output)
         self.assertIn("REQ-01 from", output)
 
-    def test_both_generated_prds_pass_with_a_complete_map(self) -> None:
-        for fixture in ("prd-multiline-title.yaml", "prd-multiline-evidence.yaml"):
+    def test_both_generated_specs_pass_with_a_complete_map(self) -> None:
+        for fixture in ("spec-multiline-title.yaml", "spec-multiline-evidence.yaml"):
             with self.subTest(fixture):
-                self.use_prd(fixture)
+                self.use_spec(fixture)
                 code, output = self.run_validator()
                 self.assertEqual(code, 0, output)
                 self.assertIn("ok: 3 task file(s) and 8 source item(s)", output)
@@ -748,7 +748,7 @@ class SelectedFilesTest(ValidatorCase):
         self.assertEqual(code, 1, output)
         self.assertIn("00-kept-old-task.md:1: line 1 must be `---`", output)
 
-    def test_a_shared_contract_of_another_prd_may_differ(self) -> None:
+    def test_a_shared_contract_of_another_spec_may_differ(self) -> None:
         files = valid_files()
         files["00-old-export.md"] = task(
             "Old export",
@@ -759,7 +759,7 @@ class SelectedFilesTest(ValidatorCase):
         code, output = self.run_validator("--files", *VALID_TASKS)
         self.assertEqual(code, 0, output)
 
-    def test_a_predecessor_of_another_prd_keeps_its_shared_contract(self) -> None:
+    def test_a_predecessor_of_another_spec_keeps_its_shared_contract(self) -> None:
         files = valid_files()
         files["00-export-log.md"] = task(
             "Export log",
@@ -786,7 +786,7 @@ class SelectedFilesTest(ValidatorCase):
             output,
         )
 
-    def test_a_predecessor_of_another_prd_binds_only_the_tasks_that_need_it(self) -> None:
+    def test_a_predecessor_of_another_spec_binds_only_the_tasks_that_need_it(self) -> None:
         report = "### Shared: Report command\n\n`reading-log report` prints one line per entry.\n"
         files = valid_files()
         files["00-format-report.md"] = task(
@@ -806,7 +806,7 @@ class SelectedFilesTest(ValidatorCase):
         code, output = self.run_validator("--files", *VALID_TASKS)
         self.assertEqual(code, 0, output)
 
-    def test_a_kept_task_of_this_prd_keeps_its_shared_contract(self) -> None:
+    def test_a_kept_task_of_this_spec_keeps_its_shared_contract(self) -> None:
         files = valid_files()
         files["00-seed-log.md"] = task(
             "Seed log",
@@ -931,13 +931,13 @@ class SelectedFilesTest(ValidatorCase):
         self.assertEqual(code, 1, output)
         self.assertIn("TEST-09 is not an `id` in", output)
 
-    def test_a_source_map_or_prd_that_is_not_utf8_is_reported(self) -> None:
+    def test_a_source_map_or_spec_that_is_not_utf8_is_reported(self) -> None:
         for label, path in (
             ("source map", self.task_dir / "source-map-reading-log-tags.md"),
-            ("PRD", self.prd),
+            ("spec", self.spec),
         ):
             with self.subTest(label):
-                self.prd.write_text(PRD, encoding="utf-8")
+                self.spec.write_text(SPEC, encoding="utf-8")
                 self.write(valid_files())
                 path.write_bytes(b"# Source\n\xff\n")
                 code, output = self.run_validator()

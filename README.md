@@ -14,7 +14,7 @@ See the [release instructions](https://github.com/dhohner/clankers-dev/blob/main
 
 | Plugin | Purpose | Claude Code | Codex App / CLI | Pi |
 | --- | --- | --- | --- | --- |
-| [`project-advisor`](./plugins/project-advisor) | Recommends product work, writes PRDs, and converts accepted PRDs into Jira issues or tasks for coding agents. | Yes | Yes | No |
+| [`project-advisor`](./plugins/project-advisor) | Recommends product work, writes specs, and converts accepted specs into Jira issues or tasks for coding agents. | Yes | Yes | No |
 | [`task-executor`](./plugins/task-executor) | Implements task files for coding agents and standalone changes using TDD, with independent verification of requirements. | Yes | Yes | No |
 | [`refactor-tools`](./plugins/refactor-tools) | Simplifies code and reviews changes for quality, security, and maintainability. | Yes | Yes | No |
 | [`scribe`](./plugins/scribe) | Writes commit messages that explain why staged changes were made and edits AI prose for clarity without changing its meaning. | Yes | Yes | No |

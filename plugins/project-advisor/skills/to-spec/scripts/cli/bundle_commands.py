@@ -1,0 +1,268 @@
+"""Bundle lifecycle commands for the spec bundle CLI."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+from typing import Any
+
+from ..advisories import manifest_warnings
+from ..bundle import BUNDLE_PREFIX, bundle_dir_name, generate_bundle
+from ..coverage import coverage_gaps
+from ..interview.client import live_sessions
+from ..interview.session import summarize
+from ..manifest_types import NormalizedManifest
+from ..output_validation import BundleValidationError, _analyze_generated_bundle
+from ..spec import entity_blocks, iter_tree_nodes, tree_blocks
+from .support import (
+    ENTRYPOINT,
+    CliFailure,
+    display_path,
+    load_manifest,
+    next_command,
+    summary,
+    truncate,
+)
+
+
+def command_status(args: argparse.Namespace) -> dict[str, Any]:
+    root = args.output_root
+    bundles = (
+        sorted(
+            [path for path in root.glob(f"{BUNDLE_PREFIX}*") if path.is_dir()],
+            key=_safe_mtime,
+        )
+        if root.is_dir()
+        else []
+    )
+    latest = bundles[-1] if bundles else None
+    drafts = [bundle / "spec.yaml" for bundle in bundles if (bundle / "spec.yaml").is_file()]
+    next_steps = (
+        [
+            f"open {display_path(latest / 'index.html')}",
+            next_command(f"inspect {display_path(latest)}"),
+        ]
+        if latest
+        else [next_command("validate <spec.yaml>"), next_command("generate <spec.yaml>")]
+    )
+    return {
+        "status": "ok",
+        "workspace": display_path(Path.cwd()),
+        "generator": display_path(ENTRYPOINT),
+        "output_root": display_path(root),
+        "bundle_count": len(bundles),
+        "latest_bundle": None if latest is None else display_path(latest),
+        "existing_drafts": [display_path(path) for path in drafts],
+        "interview_sessions": [
+            {"session": display_path(files.session), "state": summarize(files).state}
+            for files in live_sessions(Path.cwd())
+        ],
+        "next": next_steps,
+    }
+
+
+def command_generate(args: argparse.Namespace) -> dict[str, Any]:
+    manifest = load_manifest(args.manifest)
+    target = args.output_root.resolve() / bundle_dir_name(manifest["slug"])
+    if (target.exists() or target.is_symlink()) and not args.force:
+        display_target = display_path(target)
+        raise CliFailure(
+            {
+                "status": "error",
+                "code": "bundle_exists",
+                "bundle": display_target,
+                "errors": [
+                    {
+                        "path": "bundle",
+                        "message": f"{display_target} already exists",
+                        "fix": "Use --force only when replacing the bundle intentionally.",
+                    }
+                ],
+                "next": [
+                    next_command(f"inspect {display_target}"),
+                    next_command(f"generate {display_path(args.manifest)} --force"),
+                ],
+            }
+        )
+    try:
+        bundle = generate_bundle(manifest, args.output_root, args.force)
+    except FileExistsError as error:
+        raise CliFailure(
+            {
+                "status": "error",
+                "code": "bundle_exists",
+                "errors": [{"path": "bundle", "message": str(error)}],
+                "next": [next_command(f"generate {display_path(args.manifest)} --force")],
+            }
+        ) from error
+    except RuntimeError as error:
+        raise CliFailure(
+            {
+                "status": "error",
+                "code": "generator_failed",
+                "errors": [{"path": "bundle", "message": str(error)}],
+                "next": [next_command(f"validate {display_path(args.manifest)}")],
+            },
+            3,
+        ) from error
+    except OSError as error:
+        raise CliFailure(
+            {
+                "status": "error",
+                "code": "io_error",
+                "errors": [{"path": "bundle", "message": str(error)}],
+                "next": [next_command(f"generate {display_path(args.manifest)}")],
+            }
+        ) from error
+
+    return {
+        "status": "ok",
+        "bundle": display_path(bundle),
+        "manifest_version": manifest["schema_version"],
+        "files": {
+            "index": display_path(bundle / "index.html"),
+            "manifest": display_path(bundle / "spec.yaml"),
+        },
+        "validation": {"manifest": "ok", "bundle": "ok"},
+        "summary": summary(manifest),
+        "next": [
+            f"open {display_path(bundle / 'index.html')}",
+            next_command(f"inspect {display_path(bundle)}"),
+        ],
+    }
+
+
+def command_inspect(args: argparse.Namespace) -> dict[str, Any]:
+    bundle = args.bundle
+    if not bundle.exists():
+        raise CliFailure(
+            {
+                "status": "error",
+                "code": "bundle_missing",
+                "bundle": display_path(bundle),
+                "errors": [
+                    {
+                        "path": "bundle",
+                        "message": f"{display_path(bundle)} does not exist",
+                        "fix": "Generate the bundle before inspecting it.",
+                    }
+                ],
+                "next": [next_command("status"), next_command("generate <spec.yaml>")],
+            }
+        )
+    try:
+        analysis = _analyze_generated_bundle(bundle)
+    except BundleValidationError as error:
+        messages = [part.strip() for part in str(error).split(";") if part.strip()]
+        items, truncated = truncate(
+            [{"path": "bundle", "message": message} for message in messages],
+            args.full,
+        )
+        payload: dict[str, Any] = {
+            "status": "error",
+            "code": "bundle_invalid",
+            "bundle": display_path(bundle),
+            "total_errors": len(messages),
+            "errors": items,
+            "next": [next_command(f"generate {display_path(bundle / 'spec.yaml')} --force")],
+        }
+        if truncated:
+            payload["truncated"] = True
+            payload["next"].insert(
+                0,
+                next_command(f"inspect {display_path(bundle)} --full"),
+            )
+        raise CliFailure(payload) from error
+    except OSError as error:
+        raise CliFailure(
+            {
+                "status": "error",
+                "code": "bundle_unreadable",
+                "bundle": display_path(bundle),
+                "errors": [{"path": "bundle", "message": str(error)}],
+                "next": [next_command("status")],
+            }
+        ) from error
+
+    manifest = analysis.manifest
+    all_warnings = manifest_warnings(manifest, Path.cwd())
+    warnings, warnings_truncated = truncate(all_warnings, args.full)
+    assets, assets_truncated = truncate(
+        sorted(
+            str(path.relative_to(bundle))
+            for path in (bundle / "assets").rglob("*")
+            if path.is_file()
+        ),
+        args.full,
+    )
+    payload = {
+        "status": "ok",
+        "bundle": display_path(bundle),
+        "manifest_version": manifest["schema_version"],
+        "files": {
+            "index": display_path(bundle / "index.html"),
+            "manifest": display_path(bundle / "spec.yaml"),
+        },
+        "sections": list(manifest["blocks"]),
+        "ids": _entity_ids(manifest),
+        "assets": assets,
+        "anchors": {
+            "count": len(analysis.ids),
+            "broken": sorted(set(analysis.fragment_links) - set(analysis.ids)),
+        },
+        "traceability": _traceability_summary(manifest),
+        "validation": {"manifest": "ok", "bundle": "ok"},
+        "total_warnings": len(all_warnings),
+        "warnings": warnings,
+        "next": [
+            f"open {display_path(bundle / 'index.html')}",
+            next_command(f"validate {display_path(bundle / 'spec.yaml')}"),
+        ],
+    }
+    if warnings_truncated:
+        payload["warnings_truncated"] = True
+    if assets_truncated:
+        payload["assets_truncated"] = True
+    if warnings_truncated or assets_truncated:
+        payload["next"].insert(
+            0,
+            next_command(f"inspect {display_path(bundle)} --full"),
+        )
+    if args.full:
+        payload["html_ids"] = analysis.ids
+        payload["fragment_links"] = analysis.fragment_links
+        payload["normalized_manifest"] = manifest
+    return payload
+
+
+def _safe_mtime(path: Path) -> float:
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
+
+
+def _entity_ids(manifest: NormalizedManifest) -> list[str]:
+    blocks = manifest["blocks"]
+    ids_by_block = {
+        name: [item["id"] for item in items] for name, _, items in entity_blocks(blocks)
+    }
+    for name, _, nodes in tree_blocks(blocks):
+        ids_by_block[name] = [node["id"] for node in iter_tree_nodes(nodes)]
+    # The design tree sits between entity blocks in catalog order.
+    return [entity_id for name in blocks for entity_id in ids_by_block.get(name, [])]
+
+
+def _traceability_summary(manifest: NormalizedManifest) -> dict[str, Any]:
+    blocks = manifest["blocks"]
+    requirements = blocks.get("requirements", [])
+    return {
+        "requirements": len(requirements),
+        "requirements_with_validation": sum(bool(item.get("validation")) for item in requirements),
+        "requirements_with_exception": sum(bool(item.get("exception")) for item in requirements),
+        "validation_links": sum(len(item.get("validation", [])) for item in requirements),
+        "held": [{"id": label, "gap": gap} for label, gap in coverage_gaps(blocks)],
+    }
+
+
+__all__ = ["command_generate", "command_inspect", "command_status"]

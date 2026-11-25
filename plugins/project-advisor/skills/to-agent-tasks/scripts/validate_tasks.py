@@ -3,7 +3,7 @@
 
 Run it from the repository root:
 
-    python3 <skill-dir>/scripts/validate_tasks.py <task-dir> --prd <prd.yaml>
+    python3 <skill-dir>/scripts/validate_tasks.py <task-dir> --spec <spec.yaml>
 
 The script runs in user repositories with whatever `python3` is installed, so it uses
 only the standard library and must stay parseable and runnable by Python 3.9.
@@ -65,13 +65,13 @@ HEADING = re.compile(r"^(#{1,6})(?:\s|$)")
 SHARED_HEADING = re.compile(r"^###\s+Shared:\s*(.*?)\s*$")
 
 SOURCE_ID = re.compile(r"^(?:REQ|DEC|RISK|QUESTION|TEST|NODE)-[A-Z0-9][A-Z0-9-]*$", re.IGNORECASE)
-PRD_ID_LINE = re.compile(r"""^\s*(?:-\s+)?id:\s*["']?([A-Za-z]+-[A-Za-z0-9-]+)["']?\s*(?:#.*)?$""")
+SPEC_ID_LINE = re.compile(r"""^\s*(?:-\s+)?id:\s*["']?([A-Za-z]+-[A-Za-z0-9-]+)["']?\s*(?:#.*)?$""")
 # A line that opens a block scalar after a key, such as `- title: |-`, or after a list marker,
 # such as `- |-`. Group 1 ends at the column of the key or of the last list marker.
 BLOCK_SCALAR_LINE = re.compile(
     r"^(\s*(?:-\s+)*?)(?:(?:-\s+)|[^\s#-][^:]*:\s+)[|>][-+0-9]*\s*(?:#.*)?$"
 )
-PRD_SLUG_LINE = re.compile(
+SPEC_SLUG_LINE = re.compile(
     r"""^slug:\s*["']?([a-z0-9]+(?:-[a-z0-9]+)*)["']?\s*(?:#.*)?$""", re.MULTILINE
 )
 MAP_HEADER = ("source item", "disposition", "tasks", "note")
@@ -515,19 +515,19 @@ def check_dependencies(task: Task, tasks: dict[str, Task], task_dir: Path) -> No
 
 
 def check_shared_contracts(
-    tasks: dict[str, Task], chosen: Iterable[str], prd_set: Collection[str]
+    tasks: dict[str, Task], chosen: Iterable[str], spec_set: Collection[str]
 ) -> list[Problem]:
     """Report each chosen task whose copy of a shared contract differs from a binding copy.
 
-    Another PRD may give a contract the same name, so a chosen task is bound only by the tasks
-    of this PRD, `prd_set`, and by the tasks it needs. A conflict names the lowest-numbered copy.
+    Another spec may give a contract the same name, so a chosen task is bound only by the tasks
+    of this spec, `spec_set`, and by the tasks it needs. A conflict names the lowest-numbered copy.
     """
     problems = []
     for task in (tasks[name] for name in chosen):
         if not task.shared:
             continue
         peers = sorted(
-            (tasks[name] for name in ancestors(task.dependency_names(), tasks).union(prd_set)),
+            (tasks[name] for name in ancestors(task.dependency_names(), tasks).union(spec_set)),
             key=lambda item: (item.prefix, item.name),
         )
         for contract, (number, body) in task.shared.items():
@@ -563,9 +563,9 @@ def task_names(cell: str) -> list[str]:
     return [part.strip("`") for part in re.split(r"[,\s]+", cell) if part.strip("`")]
 
 
-def prd_ids(text: str) -> dict[str, None]:
-    """Return the source ids of the PRD in order, skipping the text of block scalars."""
-    # A dict keeps the unique ids in PRD order.
+def spec_ids(text: str) -> dict[str, None]:
+    """Return the source ids of the spec in order, skipping the text of block scalars."""
+    # A dict keeps the unique ids in spec order.
     ids: dict[str, None] = {}
     scalar_indent: int | None = None
     for line in text.splitlines():
@@ -579,24 +579,24 @@ def prd_ids(text: str) -> dict[str, None]:
             # The text is indented past the node that holds it: the key, or the list marker.
             scalar_indent = len(scalar.group(1))
             continue
-        match = PRD_ID_LINE.match(line)
+        match = SPEC_ID_LINE.match(line)
         if match and SOURCE_ID.match(match.group(1)):
             ids[match.group(1).upper()] = None
     return ids
 
 
 def check_source_map(
-    task_dir: Path, prd: Path, tasks: dict[str, Task], chosen: Iterable[str]
+    task_dir: Path, spec: Path, tasks: dict[str, Task], chosen: Iterable[str]
 ) -> tuple[list[Problem], int, set]:
     """Return the problems, the number of source items, and the task files the map names."""
-    text = read_utf8(prd)
+    text = read_utf8(spec)
     if text is None:
-        return [Problem(prd, None, NOT_UTF8)], 0, set()
-    slug = PRD_SLUG_LINE.search(text)
+        return [Problem(spec, None, NOT_UTF8)], 0, set()
+    slug = SPEC_SLUG_LINE.search(text)
     if not slug:
-        message = "the PRD has no `slug`, so the source map has no name"
-        return [Problem(prd, None, message)], 0, set()
-    ids = prd_ids(text)
+        message = "the spec has no `slug`, so the source map has no name"
+        return [Problem(spec, None, message)], 0, set()
+    ids = spec_ids(text)
 
     path = task_dir / f"source-map-{slug.group(1)}.md"
     if not path.is_file():
@@ -662,7 +662,7 @@ def check_source_map(
             continue
         items[key] = number
         if is_id and key not in ids:
-            report(number, f"{item} is not an `id` in {prd}")
+            report(number, f"{item} is not an `id` in {spec}")
 
         disposition = disposition.strip("`").strip().lower()
         if disposition not in DISPOSITIONS:
@@ -683,7 +683,7 @@ def check_source_map(
 
     for source_id in ids:
         if source_id not in items:
-            report(None, f"{source_id} from {prd} has no row")
+            report(None, f"{source_id} from {spec} has no row")
     for name in chosen:
         if name in tasks and name not in named:
             problems.append(
@@ -693,7 +693,7 @@ def check_source_map(
 
 
 def check(
-    task_dir: Path, prd: Path, files: Sequence[str] | None = None
+    task_dir: Path, spec: Path, files: Sequence[str] | None = None
 ) -> tuple[list[Problem], int, int]:
     """Return the problems, the number of checked task files, and the number of source items."""
     problems: list[Problem] = []
@@ -756,8 +756,8 @@ def check(
         check_edges(tasks[name], tasks, task_dir)
         problems.extend(tasks[name].graph_problems)
 
-    map_problems, items, mapped = check_source_map(task_dir, prd, tasks, chosen)
-    # This PRD's tasks are the tasks of this run and the kept tasks that its source map names.
+    map_problems, items, mapped = check_source_map(task_dir, spec, tasks, chosen)
+    # This spec's tasks are the tasks of this run and the kept tasks that its source map names.
     problems.extend(check_shared_contracts(tasks, chosen, mapped.union(chosen)))
     problems.extend(map_problems)
     return problems, len(chosen), items
@@ -773,7 +773,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "task_dir", type=Path, help="the task directory, such as action-items/agent-tasks"
     )
     parser.add_argument(
-        "--prd", type=Path, required=True, help="the accepted prd.yaml the tasks come from"
+        "--spec", type=Path, required=True, help="the accepted spec.yaml the tasks come from"
     )
     parser.add_argument(
         "--files",
@@ -786,10 +786,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not args.task_dir.is_dir():
         parser.error(f"{args.task_dir} is not a directory")
-    if not args.prd.is_file():
-        parser.error(f"{args.prd} is not a file")
+    if not args.spec.is_file():
+        parser.error(f"{args.spec} is not a file")
 
-    problems, checked, items = check(args.task_dir, args.prd, args.files)
+    problems, checked, items = check(args.task_dir, args.spec, args.files)
     for problem in problems:
         print(problem)
     if problems:

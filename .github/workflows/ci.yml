@@ -44,7 +44,7 @@ jobs:
               - "vitest.config.mts"
               - ".github/workflows/ci.yml"
             python:
-              - "plugins/project-advisor/skills/to-prd/**"
+              - "plugins/project-advisor/skills/to-spec/**"
               # The to-agent-tasks tests read its template, so any change in the skill runs them.
               - "plugins/project-advisor/skills/to-agent-tasks/**"
               # The root package.json holds the Python scripts and the ruff version.
@@ -157,7 +157,7 @@ jobs:
         run: pnpm test:py
         env:
           # Shared runners are slower and noisier than a local machine.
-          TO_PRD_TEST_TIME_SCALE: "3"
+          TO_SPEC_TEST_TIME_SCALE: "3"
 
   workflows-lint:
     needs: changes

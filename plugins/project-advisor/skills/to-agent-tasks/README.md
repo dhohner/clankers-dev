@@ -1,11 +1,11 @@
-# PRD to agent tasks
+# Spec to agent tasks
 
-Turn an accepted `to-prd` `prd.yaml` bundle into Markdown implementation tasks that agents can execute autonomously, in dependency order.
+Turn an accepted `to-spec` `spec.yaml` bundle into Markdown implementation tasks that agents can execute autonomously, in dependency order.
 
 ## Input and output
 
 The source must have `status: Accepted`, or you must accept it in the conversation.
-The skill uses `prd.yaml` as the authoritative source and checks repository evidence for each task.
+The skill uses `spec.yaml` as the authoritative source and checks repository evidence for each task.
 It writes tasks to `action-items/agent-tasks/` by default:
 
 ```text
@@ -13,11 +13,11 @@ action-items/agent-tasks/
 ├── 01-short-task-title.md
 ├── 02-next-task-title.md
 ├── ...
-└── source-map-<prd-slug>.md
+└── source-map-<spec-slug>.md
 ```
 
 Task files are the files with a numeric prefix.
-The source map records one disposition for every PRD item, such as implementation, validation, blocker, or no work, and names the tasks that carry it.
+The source map records one disposition for every spec item, such as implementation, validation, blocker, or no work, and names the tasks that carry it.
 
 Each task file starts with YAML frontmatter that lists its predecessor task files and its implementation state:
 
@@ -38,8 +38,8 @@ The skill writes only `state: pending`, and a tool that implements the task sets
 A runner can read the frontmatter to plan parallel work and skip finished tasks.
 
 One request runs source intake, repository inspection, writing, and audit.
-When a decision that changes behavior, a contract, security, external state, or scope is missing from the accepted PRD, the skill asks once before writing.
-You choose a PRD revision through `to-prd` or a scoped blocker, so such a decision never enters a task as an assumption.
+When a decision that changes behavior, a contract, security, external state, or scope is missing from the accepted spec, the skill asks once before writing.
+You choose a spec revision through `to-spec` or a scoped blocker, so such a decision never enters a task as an assumption.
 Request breakdown review when you want a planning checkpoint.
 Existing task files stay in place unless you ask for a regeneration.
 
@@ -58,7 +58,7 @@ Existing task files stay in place unless you ask for a regeneration.
 The skill checks its output with a bundled validator that needs Python 3.9 or newer and no packages:
 
 ```sh
-python3 <skill-dir>/scripts/validate_tasks.py action-items/agent-tasks --prd action-items/PRD-<slug>/prd.yaml
+python3 <skill-dir>/scripts/validate_tasks.py action-items/agent-tasks --spec action-items/SPEC-<slug>/spec.yaml
 ```
 
 It checks file names, frontmatter, `depends_on` edges against the `Needs first` lines, sections, the executor text, leftover placeholders, coverage types, shared contract copies, and the source map.
@@ -66,7 +66,7 @@ It checks file names, frontmatter, `depends_on` edges against the `Needs first` 
 The validator audits only those files and requires `state: pending` for them.
 Of the kept tasks, it checks only the frontmatter and `depends_on` entries of the predecessors that those files reach.
 It compares the shared contracts of those files with every copy among them and the kept tasks that the source map names.
-A kept predecessor of another PRD binds only the files that need it, directly or through other tasks.
+A kept predecessor of another spec binds only the files that need it, directly or through other tasks.
 `--files` without names checks only the source map, for a run that writes no task file.
 It does not judge evidence, prose, scope, or contract precision; the skill audits those against `references/task-writing-checklist.md`.
 
@@ -77,8 +77,8 @@ It asks the user only when a decision would change required behavior, a public o
 ## Usage
 
 ```text
-"Create coding agent tasks from the accepted prd.yaml"
-"Turn this accepted PRD into autonomous implementation tasks"
+"Create coding agent tasks from the accepted spec.yaml"
+"Turn this accepted spec into autonomous implementation tasks"
 "Show me the task breakdown before writing the files"
 ```
 

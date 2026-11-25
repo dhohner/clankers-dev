@@ -1,5 +1,5 @@
 #!/bin/sh
-# Prepares a workspace for eval 2: the PRD at inputs/prd.yaml and the fixture
+# Prepares a workspace for eval 2: the spec at inputs/spec.yaml and the fixture
 # repository at outputs/repo, committed so the run's changes show in `git status`.
 # Usage: setup-reading-log-eval.sh <workspace>
 set -eu
@@ -12,7 +12,7 @@ fi
 here=$(cd "$(dirname "$0")" && pwd)
 workspace=$1
 
-for target in "$workspace/inputs/prd.yaml" "$workspace/outputs/repo"; do
+for target in "$workspace/inputs/spec.yaml" "$workspace/outputs/repo"; do
   if [ -e "$target" ]; then
     echo "refusing to overwrite $target" >&2
     exit 1
@@ -20,7 +20,7 @@ for target in "$workspace/inputs/prd.yaml" "$workspace/outputs/repo"; do
 done
 
 mkdir -p "$workspace/inputs" "$workspace/outputs"
-cp "$here/prd-reading-log-tags.yaml" "$workspace/inputs/prd.yaml"
+cp "$here/spec-reading-log-tags.yaml" "$workspace/inputs/spec.yaml"
 cp -R "$here/reading-log-repo" "$workspace/outputs/repo"
 
 cd "$workspace/outputs/repo"

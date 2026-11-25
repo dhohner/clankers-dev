@@ -60,6 +60,6 @@ Use this format unless the user requests another.
 
 Use `high` only when multiple independent signals converge, `medium` when the recommendation depends on a bounded inference, and `low` when a key product assumption remains unresolved.
 
-After delivering the recommendation, ask whether the user wants it expanded into a PRD.
-Use an interactive question tool when available, with options such as "Yes, write the PRD" and "No, keep the recommendation."
-If the user agrees, invoke `to-prd` with the recommendation as initial context.
+After delivering the recommendation, ask whether the user wants it expanded into a spec.
+Use an interactive question tool when available, with options such as "Yes, write the spec" and "No, keep the recommendation."
+If the user agrees, invoke `to-spec` with the recommendation as initial context.

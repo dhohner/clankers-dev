@@ -1,0 +1,240 @@
+"""Shared helpers for the spec bundle CLI."""
+
+from __future__ import annotations
+
+import re
+import shlex
+import shutil
+import sys
+from pathlib import Path
+from typing import Any
+
+from ..advisories import iter_strings, manifest_warnings
+from ..manifest_types import NormalizedManifest
+from ..spec import CURRENT_SCHEMA_VERSION
+from ..validation import ManifestError, validate_manifest
+from ..yaml_manifest import YamlError, loads
+
+SKILL_DIR = Path(__file__).resolve().parents[2]
+ENTRYPOINT = SKILL_DIR / "scripts" / "__main__.py"
+GERMAN_CANDIDATE = re.compile(
+    r"[äöüÄÖÜß]|\b(und|oder|nicht|für|mit|ohne|wenn|dann|ist|sind)\b",
+    re.IGNORECASE,
+)
+
+
+class CliFailure(Exception):
+    def __init__(self, payload: dict[str, Any], exit_code: int = 2) -> None:
+        self.payload = payload
+        self.exit_code = exit_code
+
+
+def display_path(path: Path) -> str:
+    try:
+        return str(path.resolve().relative_to(Path.cwd().resolve()))
+    except OSError, ValueError:
+        return str(path)
+
+
+def next_command(command: str) -> str:
+    return f"{_cli_name()} {command}"
+
+
+def _cli_name() -> str:
+    entrypoint = Path(sys.argv[0])
+    if entrypoint.suffix == ".py":
+        return f"{_interpreter()} {shlex.quote(display_path(entrypoint))}"
+    return shlex.quote(display_path(entrypoint))
+
+
+def _interpreter() -> str:
+    """Name the running interpreter, because `python3` on PATH can be too old to run the CLI."""
+    on_path = shutil.which("python3")
+    try:
+        if on_path and Path(on_path).resolve() == Path(sys.executable).resolve():
+            return "python3"
+    except OSError:
+        pass
+    return shlex.quote(sys.executable)
+
+
+def load_manifest(path: Path, full: bool = False) -> NormalizedManifest:
+    try:
+        raw = loads(path.read_text(encoding="utf-8"))
+    except YamlError as error:
+        raise CliFailure(
+            {
+                "status": "error",
+                "code": "yaml_invalid",
+                "manifest": display_path(path),
+                "errors": [
+                    {
+                        "path": "manifest",
+                        "message": f"line {error.line}, {error}",
+                        "fix": "Repair the YAML syntax, then validate again.",
+                    }
+                ],
+                "next": [
+                    next_command(f"validate {display_path(path)}"),
+                    next_command("examples"),
+                ],
+            }
+        ) from error
+    except FileNotFoundError as error:
+        raise CliFailure(
+            {
+                "status": "error",
+                "code": "file_not_found",
+                "manifest": display_path(path),
+                "errors": [
+                    {
+                        "path": "manifest",
+                        "message": f"{display_path(path)} does not exist",
+                        "fix": "Pass an existing YAML manifest path.",
+                    }
+                ],
+                "next": [next_command("examples")],
+            }
+        ) from error
+    except OSError as error:
+        raise CliFailure(
+            {
+                "status": "error",
+                "code": "manifest_unreadable",
+                "manifest": display_path(path),
+                "errors": [{"path": "manifest", "message": str(error)}],
+                "next": [next_command(f"validate {display_path(path)}")],
+            }
+        ) from error
+
+    try:
+        return validate_manifest(raw)
+    except ManifestError as error:
+        items = [_manifest_error_item(message) for message in error.errors]
+        shown, truncated = truncate(items, full)
+        payload: dict[str, Any] = {
+            "status": "error",
+            "code": "manifest_invalid",
+            "manifest": display_path(path),
+            "total_errors": len(items),
+            "errors": shown,
+            "next": [
+                next_command("schema requirements"),
+                next_command("examples api-heavy"),
+            ],
+        }
+        if truncated:
+            payload["truncated"] = True
+            payload["next"].insert(
+                0,
+                next_command(f"validate {display_path(path)} --full"),
+            )
+        raise CliFailure(payload) from error
+
+
+def validation_payload(
+    manifest: NormalizedManifest, manifest_path: Path, full: bool = False
+) -> dict[str, Any]:
+    manifest_summary = summary(manifest)
+    german_candidates = manifest_summary["untranslated_german_candidates"]
+    warnings = []
+    if german_candidates:
+        warnings.append(f"review {german_candidates} possible untranslated German string(s)")
+    warnings.extend(manifest_warnings(manifest, Path.cwd()))
+    shown_warnings, warnings_truncated = truncate(warnings, full)
+    payload: dict[str, Any] = {
+        "status": "ok",
+        "manifest": display_path(manifest_path),
+        "manifest_version": manifest["schema_version"],
+        "normalized_slug": manifest["slug"],
+        "review_surfaces": manifest["review_surfaces"],
+        "selected_blocks": list(manifest["blocks"]),
+        "missing_traceability": [],
+        "summary": manifest_summary,
+        "total_warnings": len(warnings),
+        "warnings": shown_warnings,
+        "next": [
+            next_command(f"generate {display_path(manifest_path)}"),
+            next_command("schema requirements"),
+        ],
+    }
+    if warnings_truncated:
+        payload["warnings_truncated"] = True
+        payload["next"].insert(0, next_command(f"validate {display_path(manifest_path)} --full"))
+    return payload
+
+
+def summary(manifest: NormalizedManifest) -> dict[str, int]:
+    blocks = manifest["blocks"]
+    return {
+        "blocks": len(blocks),
+        "requirements": len(blocks.get("requirements", [])),
+        "tests": len(blocks.get("testing_strategy", [])),
+        "risks": len(blocks.get("risks", [])),
+        "open_questions": len(blocks.get("open_questions", [])),
+        "untranslated_german_candidates": _count_german_candidates(manifest),
+        "broken_references": 0,
+    }
+
+
+def truncate(items: list[Any], full: bool, limit: int = 20) -> tuple[list[Any], bool]:
+    if full or len(items) <= limit:
+        return items, False
+    return items[:limit], True
+
+
+def _manifest_error_item(message: str) -> dict[str, str]:
+    item = {"path": _error_path(message), "message": message}
+    fix = _fix_for(message)
+    if fix:
+        item["fix"] = fix
+    return item
+
+
+def _error_path(message: str) -> str:
+    if message.startswith("duplicate entity id"):
+        return "blocks"
+    markers = (" must ", " is ", " are ", " contains ", " requires ", " references ")
+    for marker in markers:
+        if marker in message:
+            path = message.split(marker, 1)[0].split()[0]
+            return path.rstrip(":")
+    return "manifest"
+
+
+def _fix_for(message: str) -> str:
+    if (
+        "must reference a TEST entity id" in message
+        or "must connect to a validation outcome" in message
+    ):
+        return "Add a matching testing_strategy item or set an explicit exception."
+    if "references missing entity id" in message:
+        return "Add the referenced entity or remove the reference."
+    if message.startswith("blocks.design_tree is required"):
+        return "Add the design_tree block that records the interview decisions."
+    if message.startswith("schema_version"):
+        return f"Set schema_version: {CURRENT_SCHEMA_VERSION}."
+    if message.startswith("slug"):
+        return "Use lowercase kebab-case."
+    if "review_surfaces" in message:
+        return "Include document and the initiative-specific review surface."
+    if "must be a non-empty" in message:
+        return "Provide the required value."
+    return ""
+
+
+def _count_german_candidates(value: Any) -> int:
+    return sum(bool(GERMAN_CANDIDATE.search(text)) for _, text in iter_strings(value))
+
+
+__all__ = [
+    "ENTRYPOINT",
+    "SKILL_DIR",
+    "CliFailure",
+    "display_path",
+    "load_manifest",
+    "next_command",
+    "summary",
+    "truncate",
+    "validation_payload",
+]

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="description" content="{{SUMMARY}}" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="oklch(13% 0.014 265)" />
+    <title>Spec · {{TITLE}}</title>
+    <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./assets/styles.css?v={{ASSET_VERSION}}" />
+    <script src="./assets/app.js?v={{ASSET_VERSION}}" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#content">Skip to the document</a>
+    <header class="plot-bar">
+      <a class="bar-title" href="#summary">Project Advisor spec</a>
+      <p class="doc-status">
+        <span class="lamp lamp--{{STATUS_LAMP}}" aria-hidden="true"></span>
+        <span class="sr-only">Status:</span>
+        <span>{{STATUS}}</span>
+      </p>
+    </header>
+    <div class="shell">
+      <nav class="toc" aria-label="Contents">
+        <button id="nav-toggle" class="toc-toggle" type="button" aria-expanded="false"
+          aria-controls="toc-list">Contents</button>
+        <ol id="toc-list">
+          <li class="toc-group" aria-hidden="true">On this page</li>
+          {{NAVIGATION}}
+        </ol>
+      </nav>
+      <main id="content" tabindex="-1">
+        <header id="summary" class="hero" aria-labelledby="document-title">
+          <h1 id="document-title">{{TITLE}}</h1>
+          <p class="hero-lede">{{SUMMARY}}</p>
+          {{METADATA}}
+          {{STANDING}}
+        </header>
+        {{BLOCKS}}
+        <footer class="footer">
+          <a href="#summary">Back to top</a>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

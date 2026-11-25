@@ -1,0 +1,41 @@
+schema_version: 3
+slug: minimal-spec
+title: Minimal Spec Example
+summary: A compact valid manifest for syntax reference.
+status: Draft for review
+initiative_type: small-feature
+review_surfaces:
+  - document
+metadata:
+  Owner: Example team
+blocks:
+  problem:
+    statement: Reviewers need a tiny manifest example before authoring a full spec.
+    evidence:
+      - The example keeps only the fields needed to validate and generate.
+  requirements:
+    - id: REQ-01
+      title: Valid minimal bundle
+      description: Generate a portable review bundle from a compact manifest.
+      validation:
+        - TEST-01
+  design_tree:
+    - id: NODE-01
+      label: Example size
+      question: How much of the manifest contract should the smallest example show?
+      status: settled
+      answer: Only the fields a manifest needs to validate and generate.
+      source: user
+      rationale: A short example stays readable beside the CLI schema output.
+      children:
+        - id: NODE-02
+          label: Visual block
+          question: Should the smallest example also carry a visual block?
+          status: pruned
+          reason: A visual block belongs to a focused fixture, not to the syntax example.
+  testing_strategy:
+    - id: TEST-01
+      target: Bundle generation
+      expected_outcome: Validation succeeds and the bundle contains index.html, spec.yaml, and local assets.
+      validates:
+        - REQ-01

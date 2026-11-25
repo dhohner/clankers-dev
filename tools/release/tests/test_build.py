@@ -175,8 +175,8 @@ class RepositoryDistributionTests(unittest.TestCase):
 
     def test_preserves_runtime_assets_examples_and_executable_modes(self) -> None:
         for relative in (
-            "plugins/project-advisor/skills/to-prd/bundle/assets/fonts/manrope.woff2",
-            "plugins/project-advisor/skills/to-prd/examples/fixtures/document-only.yaml",
+            "plugins/project-advisor/skills/to-spec/bundle/assets/fonts/manrope.woff2",
+            "plugins/project-advisor/skills/to-spec/examples/fixtures/document-only.yaml",
             "plugins/project-advisor/skills/to-agent-tasks/scripts/validate_tasks.py",
             "plugins/security-guard/src/shell/command-parser.ts",
             "plugins/output-styles/styles/unslop.md",
@@ -203,8 +203,8 @@ class RepositoryDistributionTests(unittest.TestCase):
                 self.assertEqual(path.read_bytes(), (ROOT / relative).read_bytes())
 
     def test_distribution_cli_runs_without_production_packages(self) -> None:
-        skill = self.output / "plugins/project-advisor/skills/to-prd"
-        for args in (("schema",), ("validate", "examples/basic-prd.yaml", "--full")):
+        skill = self.output / "plugins/project-advisor/skills/to-spec"
+        for args in (("schema",), ("validate", "examples/basic-spec.yaml", "--full")):
             with self.subTest(args=args):
                 result = subprocess.run(
                     [sys.executable, "-I", "-S", "-B", "scripts/__main__.py", *args],
@@ -252,7 +252,7 @@ class RepositoryDistributionTests(unittest.TestCase):
         )
         self.assertTrue((checkout / ".github/workflows/ci.yml").exists())
         self.assertTrue(
-            (checkout / "plugins/project-advisor/skills/to-prd/tests").exists()
+            (checkout / "plugins/project-advisor/skills/to-spec/tests").exists()
         )
         subprocess.run(
             [
@@ -268,7 +268,7 @@ class RepositoryDistributionTests(unittest.TestCase):
         )
         self.assertFalse((checkout / ".github").exists())
         self.assertFalse(
-            (checkout / "plugins/project-advisor/skills/to-prd/tests").exists()
+            (checkout / "plugins/project-advisor/skills/to-spec/tests").exists()
         )
         self.assertFalse((checkout / "plugins/security-guard/test").exists())
         self.assertFalse((checkout / "vitest.config.mts").exists())

@@ -8,7 +8,7 @@ The skill writes one Markdown file per slice to `action-items/jira-issues/` by d
 
 ```text
 "Convert the PRD into Jira issues"
-"Split the accepted prd.yaml from the to-prd bundle into Jira-ready slices"
+"Split the accepted spec.yaml from the to-spec bundle into Jira-ready slices"
 "Break this PRD into Jira issues in English"
 ```
 
@@ -22,7 +22,7 @@ You can supply mode, language, and profile independently and in any order.
 | Ticket language | `de`, `en` | `de` |
 | Ticket profile | `product`, `infrastructure` | Inferred from the outcome |
 
-`default` accepts a full PRD or an accepted `to-prd` bundle and includes breakdown approval.
+`default` accepts a full PRD or an accepted `to-spec` bundle and includes breakdown approval.
 `brief` accepts unpackaged requirements or scenarios and asks only for clarification needed to define the slices.
 
 ## Workflow and references

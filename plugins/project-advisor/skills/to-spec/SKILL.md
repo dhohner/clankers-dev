@@ -1,0 +1,206 @@
+---
+name: to-spec
+description: >-
+  Write or revise a spec as a validated local review bundle.
+  Use when the user wants a feature idea or product decisions turned into a spec, or review feedback folded into an existing `spec.yaml`.
+---
+
+# Author a spec
+
+Interview the user, write `spec.yaml`, publish the bundle, and hold the review gate until the user accepts.
+The agent owns product judgment, and the generator owns validation and publication.
+Write questions, manifest prose, and the report in ASD-STE100 Simplified Technical English:
+
+- one instruction per sentence, at most twenty words
+- active voice and present tense
+- one meaning per word, and noun clusters of at most three words
+
+Reproduce repository-backed identifiers, labels, and quoted strings verbatim.
+
+## Run the CLI
+
+`<skill-dir>` is the directory that holds this `SKILL.md`.
+In an installed plugin, it is in the plugin cache and not in the user repository.
+Run every CLI command from the repository root, so that evidence paths and `action-items/` resolve there:
+
+```sh
+python3 <skill-dir>/scripts/__main__.py <command> [options]
+```
+
+The CLI needs Python 3.14 or newer.
+Before the first command, run `python3 --version`.
+When the version is older, use `uv run --no-project --python 3.14 python` in place of `python3` for every command.
+An older interpreter stops with a message that names this replacement.
+The `next` lines name the interpreter that ran the CLI, so you can run them as they are.
+
+## Ground the decision
+
+For a revision, read the supplied `spec.yaml`, the published `action-items/SPEC-*` bundle, the feedback, and answered open questions before proposing changes.
+For a repository-backed product, inspect the repository for terminology, current behavior, and durable constraints before the first question.
+
+Structure the interview as a design tree, with dependent decisions branching from their prerequisites.
+A decision belongs in the tree when a wrong answer changes scope, a requirement, an acceptance criterion, a risk, or a review surface.
+A decision that only changes how, in what order, or with which defaults a requirement is built belongs to implementation, so prune it.
+
+For an API, the tree includes request fields, check order, error results, request replay, and concurrent requests.
+A wrong answer on each of them changes acceptance.
+
+Put only decisions to the user, and find facts yourself in the repository or through sub-agents.
+Settle a node with `source: research` only from a fact search in this session.
+Do not settle a node from memory or from an earlier session.
+Put a question in `open_questions` only when it waits on a fact nobody can find today.
+
+### Keep the session
+
+Start a new interview session for a new spec and for each revision.
+The session directory is one new scratch directory outside `action-items/`, and it holds the scratch `spec.yaml` and the round files.
+The session directory is not durable.
+The published `action-items/SPEC-<slug>/spec.yaml` is the only durable copy, and each revision starts from it.
+For a new spec, write the scratch `spec.yaml` when you record the first round.
+Start it from `template --blocks design_tree`, and replace every placeholder node with the recorded nodes.
+Before the first round, nothing is decided, so the scratch manifest does not exist yet.
+Do not add a node only to make a manifest validate.
+For a revision, copy the published `spec.yaml` into the session directory.
+
+### Ask each round in the browser
+
+Ask each round with `interview ask <session-dir> <round-file>`.
+Each round asks the whole frontier, the decisions whose prerequisites are settled.
+Write the round to a new round file in the session directory, such as `round-01.yaml`.
+Give each question the `NODE-*` id of its design tree node and a recommended answer.
+Give each dependent question the `parent` id of its prerequisite node.
+`interview ask --help` prints the round file fields and an example.
+
+Before each `interview ask`, send one progress message saying the browser round is open and you await answers.
+Run `interview ask` as a foreground command with the largest timeout your tool allows, or as a tracked background job of your tool.
+Treat `interview ask: waiting for ...` as a progress report only.
+When the execution tool returns a running session identifier, retain it and use the tool to continue waiting.
+After browser setup or recovery, resume waiting for the round result.
+When `interview ask` stops before it prints a result, run the same `interview ask` again.
+The session keeps the round, and the page keeps the draft answers.
+Keep the agent turn active while a connected browser round waits for answers.
+
+Start each fact search before the round, so it runs while the user answers: as a background sub-agent beside a foreground `interview ask`, or in the foreground beside a background one.
+Without background work, complete each fact search before the round.
+
+Each result prints a `message` when you must act and `next` lines with the commands that can follow, so follow them.
+After `answered`, record the answers, then ask the next frontier.
+
+Without a local browser, tell the user before the first round, and the user can delegate the answers to you.
+When the user delegates the answers, skip the browser round, and record your recommended answer for each question with `source: user`.
+
+### Record the answers
+
+After each round, write its nodes to `blocks.design_tree` with explicit `NODE-*` ids, verbatim questions, and a `settled`, `pruned`, or `deferred` status.
+Write each answer as the `instructions` line of the `answered` result says.
+Put each node in the `children` of the node that its `parent` names.
+When `parent` is null, put the node at the root.
+Do not write the nodes flat and nest them later.
+Use the notes and the round comment to write the rationale and to find new decisions.
+When the record gives a rationale without a `Write it from` instruction, copy that rationale as it is.
+Do not invent a reason that the user did not give.
+A written answer can add scope or a choice that the question did not offer.
+Confirm the added part in the next round.
+
+Record a decision that a fact search settles as `settled` with `source: research`.
+Each `evidence` entry names a repository path, with an optional line or symbol, or a URL.
+Record a decision that the original request states as `settled` with `source: request`.
+Its `question` is the decision as a question, and its `evidence` quotes the request word for word.
+Ask the decision in a round when the request does not state it clearly.
+`schema design_tree` prints the fields each status requires.
+
+### End the interview
+
+Continue the rounds until the frontier is empty and no decision rests on an assumption.
+Then run `interview end <session-dir>` and author the manifest.
+The user corrects a decision at the review gate with `Request changes`.
+
+Grounding is complete when every visited branch is recorded, the frontier is empty, and `status` lists no live interview session.
+
+## Author the manifest
+
+`spec.yaml` is the source of truth, and `index.html` is generated output.
+
+For a new spec, choose `initiative_type`, take its required review surfaces from `schema --authoring`, and add a block only when it improves a product decision.
+Run one `schema` call for the selected blocks, then add their `template --blocks` shapes to the scratch manifest.
+Use `examples/minimal-spec.yaml` as the skeleton, `examples/fixtures/` for one focused surface, and `examples/basic-spec.yaml` only for a broad mixed initiative.
+Read [references/manifest-contract.md](references/manifest-contract.md) when CLI output and validation errors leave a rule unclear.
+
+For a revision, edit only the paths the feedback or answered questions require.
+Set each changed node's `answer` to the current understanding and move the earlier answer to `superseded_answer`.
+Keep unrelated text, ordering, initiative type, review surfaces, and stable IDs.
+Rewrite the manifest only when the initiative shape changes broadly or the YAML cannot be repaired safely.
+
+In both cases:
+
+- Keep German only for exact repository-backed identifiers, filenames, API names, product labels, or domain idioms, with evidence where the field supports it.
+- Give requirements, decisions, risks, questions, and tests stable IDs, and link every requirement to a validation outcome or an explicit exception.
+- Add repository evidence only when it supports a product statement.
+- Record the API request, checks, response, errors, replay, and concurrency in the `api_contract` detail fields.
+
+Authoring is complete when every selected block follows its schema, every requirement is traceable, and every remaining open question waits on a fact nobody can find today and states what blocks it and who owns it.
+
+## Check consistency
+
+Before you publish, compare the decisions, requirements, risks, and constraints with each other and with the repository facts.
+Look for two kinds of defect:
+
+- A contradiction, such as a transport rule that the deployment target cannot meet.
+- A combined choice that does not say how its parts combine, such as "both methods" without a rule for each.
+
+Fix each defect that a recorded answer settles.
+When the fix changes or adds a decision, ask it in a new round.
+When the tool allows a sub-agent, give it only the manifest.
+Ask it to list contradictions and unclear combinations.
+Report the defects that the check found and how you fixed them.
+
+## Publish and inspect
+
+Run `validate`, `generate`, and `inspect action-items/SPEC-<slug>/` on the scratch manifest, and fix the YAML until both pass.
+Pass `--force` only to replace the published copy of a revision.
+Read [references/review-checklist.md](references/review-checklist.md) when inspection fails or the bundle needs a full audit.
+
+`validate` and `inspect` print `warnings` for sentences over twenty words.
+They also warn on research evidence that names no URL and no existing path inside the repository.
+Fix each warning, or state in the report why it stays.
+The CLI does not check voice, tense, or word choice, so read the prose against the ASD-STE100 rules yourself.
+
+Publication is complete when validation and inspection pass and every warning is fixed or explained.
+The prose must also follow ASD-STE100.
+
+### Check interview behavior when requested
+
+For interview page audits or behavior changes, load the applicable browser checks:
+
+- Before browser checks, read [setup](references/interview-page-checklist.md#setup) and create the session and round files.
+- For answer controls, conversation flow, or draft persistence, read [conversation and draft checks](references/interview-page-checklist.md).
+- For connectivity, submission errors, races, or competing tabs, read [connection and submission checks](references/interview-submission-checklist.md).
+- For round history, session lifecycle, assets, or browser policy, read [lifecycle and policy checks](references/interview-lifecycle-checklist.md).
+
+For full audits, run conversation, submission, then lifecycle checks in the same scratch directory.
+After submitting `ROUND-01`, use the original session for lifecycle checks.
+Use a fresh session for each competing tab check and end it afterwards.
+Run policy checks before ending the session, while the server runs.
+
+## Hold the review gate
+
+Open `action-items/SPEC-<slug>/index.html` when the environment allows it, and give its absolute path.
+The page shows only the product review blocks, so report each `traceability.held` entry from `inspect` that you did not resolve.
+Opening the page is not a visual check.
+Inspect the rendered page yourself when your tool can show it, such as with a screenshot.
+In the report, list each [visual check](references/review-checklist.md#visual-checks) that you did not do, so the human does it.
+Offer `Accept spec` and `Request changes` with the interactive question tool.
+Requested changes and answered questions re-enter the interview as a revision.
+
+Only the user's acceptance sets the spec to `Accepted`.
+An acceptance recorded only in chat blocks the handoff, because `to-issues` and `to-agent-tasks` read `status` from the published `spec.yaml`.
+On acceptance:
+
+1. Set `status: Accepted` in the working manifest and change nothing else.
+2. Rerun `validate`, `generate --force`, and `inspect` with the same `--output-root`, so the published bundle carries the accepted source.
+3. Report the published `action-items/SPEC-<slug>/spec.yaml` path as the durable source, and say that the session directory is scratch.
+
+Then offer `to-issues` for Jira-ready tickets, `to-agent-tasks` for coding-agent work packages, or no handoff, and invoke the chosen skill with the published `spec.yaml`.
+Run a handoff before acceptance only when the user asks for a combined flow.
+
+The gate is complete when the user has the review bundle with unresolved questions and unperformed visual checks visible, an accepted spec reads `status: Accepted` in the published `spec.yaml`, and the next action is explicit.
