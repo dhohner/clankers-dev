@@ -10,7 +10,9 @@ A direct predecessor is a task whose capability this task needs and that no othe
 Give each listed file exactly one `Needs first` line that starts with its file name, and list only these tasks.
 Name only task files in the destination directory with a lower numeric prefix, whether written in this run or kept from an earlier one.
 Write `depends_on: []` for a task without a `Needs first` line.
-Write `state: pending`, because only the tool that implements the task sets `state: done`.>
+`state` holds one of four values: `pending` for a task not started, `running` once the tool that implements the task starts it, `failed` when verifier gaps remain that the user declined, and `done` for a complete task.
+A failed task also lists its remaining verifier gaps under a `failure` key after `state`.
+Write `state: pending` and no `failure` key, because to-agent-tasks writes only `state: pending` and only the tool that implements the task changes the state.>
 
 # <Task title>
 

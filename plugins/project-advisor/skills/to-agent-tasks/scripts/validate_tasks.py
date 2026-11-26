@@ -49,8 +49,13 @@ EXECUTOR_TEXT = (
         "a public or persisted contract, security, external state, or scope."
     ),
 )
-STATES = ("pending", "done")
+STATES = ("pending", "running", "failed", "done")
+UNKNOWN_STATE = (
+    "`state` must be " + ", ".join(f"`{state}`" for state in STATES[:-1]) + f", or `{STATES[-1]}`"
+)
 LIST_ITEM = re.compile(r"^\s*-\s+")
+# One double-quoted string, indented two spaces, where a backslash escapes only `"` and `\`.
+FAILURE_ITEM = re.compile(r'^  - "((?:[^"\\]|\\["\\])*)"\s*$')
 COVERAGE = re.compile(
     r"new[- ]behavior coverage|regression coverage|manual verification", re.IGNORECASE
 )
@@ -80,6 +85,7 @@ DISPOSITIONS = ("implementation", "validation", "blocker", "no work")
 EMPTY_CELL = frozenset({"", "-", "—", "–", "none"})
 
 NOT_UTF8 = "the file is not UTF-8 text"
+EMPTY_FAILURE = "`failure` lists at least one verifier gap"
 NOT_CHECKED = (
     "not checked: evidence, prose, scope, and contract precision; "
     "audit them with references/task-writing-checklist.md"
@@ -108,6 +114,8 @@ class Task:
     depends_on: list[tuple[int, str]] = field(default_factory=list)
     # The `state` value and its line, once the frontmatter is parsed.
     state: tuple[int, str] | None = None
+    # The line of the `failure` key, when the frontmatter has one.
+    failure: int | None = None
     # Each section maps to its heading line and its lines as (number, text, fenced).
     sections: dict[str, tuple[int, list[tuple[int, str, bool]]]] = field(default_factory=dict)
     boundary: dict[str, list[tuple[int, str]]] = field(default_factory=dict)
@@ -186,8 +194,12 @@ def parse_frontmatter(task: Task) -> int | None:
             continue
         key, separator, value = line.partition(":")
         key = key.strip()
-        if line[:1].isspace() or not separator or key not in ("depends_on", "state"):
-            task.report_graph(number, "frontmatter holds only the keys `depends_on` and `state`")
+        if line[:1].isspace() or not separator or key not in ("depends_on", "state", "failure"):
+            task.report_graph(
+                number,
+                "frontmatter holds only the keys `depends_on`, `state`, "
+                "and `failure` for a failed task",
+            )
             continue
         if key in seen:
             task.report_graph(number, f"frontmatter repeats `{key}`")
@@ -201,8 +213,30 @@ def parse_frontmatter(task: Task) -> int | None:
         if key == "state":
             state = unquote(value)
             if state not in STATES:
-                task.report_graph(number, "`state` must be `pending` or `done`")
+                task.report_graph(number, UNKNOWN_STATE)
             task.state = (number, state)
+            continue
+        if key == "failure":
+            task.failure = number
+            if value.replace(" ", "") == "[]":
+                task.report_graph(number, EMPTY_FAILURE)
+                continue
+            if value:
+                task.report_graph(number, "write `failure` as a block list, one gap per line")
+                continue
+            items = 0
+            while index < close and LIST_ITEM.match(lines[index]):
+                item = FAILURE_ITEM.match(lines[index])
+                if not item or not item.group(1).strip():
+                    task.report_graph(
+                        index + 1,
+                        "each `failure` item is `- ` and one double-quoted string, "
+                        "indented two spaces, that summarizes one verifier gap",
+                    )
+                items += 1
+                index += 1
+            if not items:
+                task.report_graph(number, EMPTY_FAILURE)
             continue
         if value.startswith("[") and value.endswith("]"):
             inner = value[1:-1].strip()
@@ -232,6 +266,12 @@ def parse_frontmatter(task: Task) -> int | None:
     for key in ("depends_on", "state"):
         if key not in seen:
             task.report_graph(1, f"frontmatter lacks `{key}`")
+    if task.state and task.state[1] == "failed" and task.failure is None:
+        task.report_graph(
+            task.state[0], "a task with `state: failed` lists its verifier gaps under `failure`"
+        )
+    if task.state and task.state[1] != "failed" and task.failure is not None:
+        task.report_graph(task.failure, "only a task with `state: failed` has a `failure` list")
     return close + 1
 
 
@@ -707,7 +747,7 @@ def check(
             tasks[name] = read_task(task_dir / name, int(match.group(1)))
 
     # An empty selection, unlike an omitted one, audits the source map when this run wrote
-    # no task, so that kept tasks may stay done.
+    # no task, so that kept tasks keep their `running`, `failed`, or `done` state.
     # A dict keeps the chosen names unique and in the order given.
     chosen: dict[str, None] = {}
     if files is not None:
@@ -742,8 +782,10 @@ def check(
         others = [other for other in prefixes[task.prefix] if other != name]
         if others:
             task.report(None, f"numeric prefix is also used by {', '.join(others)}")
-        # Only the tool that implements a task sets `done`, so a task just written is pending.
-        if task.state and task.state[1] == "done":
+        # Only the tool that implements a task moves it past `pending`, so a task just written
+        # is pending, and the frontmatter check already rejects `failure` on a pending task.
+        # An unknown state already has its own report.
+        if task.state and task.state[1] in STATES and task.state[1] != "pending":
             task.report(task.state[0], "a task written in this run has `state: pending`")
         check_dependencies(task, tasks, task_dir)
         problems.extend(task.graph_problems)

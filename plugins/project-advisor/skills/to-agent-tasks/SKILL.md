@@ -80,7 +80,7 @@ python3 <skill-dir>/scripts/validate_tasks.py <destination> --spec <spec.yaml>
 ```
 
 When the destination keeps task files from an earlier run, of this spec or another, add `--files` with the task file names of this run.
-The validator requires `state: pending` for those files, checks the frontmatter and `depends_on` entries of the kept predecessors they reach, and compares shared contracts among them and the kept tasks that the source map names, and with each kept predecessor of another spec only for the tasks that need it.
+The validator requires `state: pending` and no `failure` key for those files, checks the frontmatter and `depends_on` entries of the kept predecessors they reach, and compares shared contracts among them and the kept tasks that the source map names, and with each kept predecessor of another spec only for the tasks that need it.
 When this run writes no task file, add `--files` without names, so the validator checks the source map and leaves kept tasks as they are.
 
 Fix every failure until the validator passes.

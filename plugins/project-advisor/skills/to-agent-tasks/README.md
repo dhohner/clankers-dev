@@ -34,7 +34,29 @@ state: pending
 The first task of a chain has `depends_on: []`.
 `depends_on` lists only direct predecessors, and each one has a `Needs first` line that starts with its file name.
 A task that a listed predecessor already requires is left out, because a runner follows the chain.
-The skill writes only `state: pending`, and a tool that implements the task sets `state: done`.
+`state` holds one of four values:
+
+- `pending`: the task has not started.
+- `running`: the tool that implements the task started it.
+- `failed`: verifier gaps remained, and the user declined them.
+- `done`: the task is complete.
+
+A failed task also has a `failure` key after `state`.
+It holds a non-empty block list with one double-quoted summary of each remaining verifier gap, and never blocked behavior:
+
+```markdown
+---
+depends_on:
+  - 01-short-task-title.md
+state: failed
+failure:
+  - "Acceptance 2: no test covers an empty tag list"
+---
+```
+
+Inside a summary, a backslash escapes each `"` and each `\`.
+The skill writes only `state: pending`, and the tool that implements the task sets the other states and the `failure` list.
+Task files in the `running` and `failed` states need task-executor 0.8.0 or later, the first version whose implement skill writes them.
 A runner can read the frontmatter to plan parallel work and skip finished tasks.
 
 One request runs source intake, repository inspection, writing, and audit.
@@ -63,8 +85,9 @@ python3 <skill-dir>/scripts/validate_tasks.py action-items/agent-tasks --spec ac
 
 It checks file names, frontmatter, `depends_on` edges against the `Needs first` lines, sections, the executor text, leftover placeholders, coverage types, shared contract copies, and the source map.
 `--files` names the task files written in this run, when the directory keeps task files from an earlier run.
-The validator audits only those files and requires `state: pending` for them.
+The validator audits only those files and requires `state: pending` and no `failure` key for them.
 Of the kept tasks, it checks only the frontmatter and `depends_on` entries of the predecessors that those files reach.
+A kept predecessor may have any of the four states, and the validator checks the `failure` list of a failed one.
 It compares the shared contracts of those files with every copy among them and the kept tasks that the source map names.
 A kept predecessor of another spec binds only the files that need it, directly or through other tasks.
 `--files` without names checks only the source map, for a run that writes no task file.

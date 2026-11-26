@@ -289,6 +289,11 @@ class TemplateAgreementTest(unittest.TestCase):
         lines = TEMPLATE.read_text(encoding="utf-8").splitlines()
         self.assertIsNotNone(validate_tasks.find_run(lines, validate_tasks.EXECUTOR_TEXT))
 
+    def test_template_frontmatter_guidance_names_every_state(self) -> None:
+        guidance = TEMPLATE.read_text(encoding="utf-8").split("\n# ", 1)[0]
+        missing = [state for state in validate_tasks.STATES if f"`{state}`" not in guidance]
+        self.assertEqual(missing, [])
+
     def test_template_sections_match_the_validator(self) -> None:
         sections = [
             line[3:].strip()
@@ -337,7 +342,10 @@ FAILURES = [
     (
         "extra frontmatter key",
         replace("01-add-entries.md", "state: pending\n", "state: pending\nowner: me\n"),
-        "01-add-entries.md:4: frontmatter holds only the keys `depends_on` and `state`",
+        (
+            "01-add-entries.md:4: frontmatter holds only the keys `depends_on`, `state`, "
+            "and `failure` for a failed task"
+        ),
     ),
     (
         "no space after the key colon",
@@ -352,7 +360,7 @@ FAILURES = [
     (
         "unknown state",
         replace("01-add-entries.md", "state: pending", "state: started"),
-        "01-add-entries.md:3: `state` must be `pending` or `done`",
+        "01-add-entries.md:3: `state` must be `pending`, `running`, `failed`, or `done`",
     ),
     (
         "missing state",
@@ -884,22 +892,119 @@ class SelectedFilesTest(ValidatorCase):
         self.assertEqual(code, 1, output)
         self.assertIn("which 02-tag-entries.md already requires", output)
 
-    def test_a_task_of_this_run_must_be_pending(self) -> None:
+    def test_a_task_of_this_run_is_pending_without_a_failure_list(self) -> None:
+        gap = '\nfailure:\n  - "Acceptance 2: no test"'
+        pending = "03-list-by-tag.md:4: a task written in this run has `state: pending`"
+        for label, frontmatter, expected in (
+            ("done", "state: done", pending),
+            ("running", "state: running", pending),
+            ("failed", "state: failed" + gap, pending),
+            (
+                "pending with a failure list",
+                "state: pending" + gap,
+                "03-list-by-tag.md:5: only a task with `state: failed` has a `failure` list",
+            ),
+        ):
+            with self.subTest(label):
+                files = valid_files()
+                replace("03-list-by-tag.md", "state: pending", frontmatter)(files)
+                self.write(files)
+                code, output = self.run_validator("--files", "03-list-by-tag.md")
+                self.assertEqual(code, 1, output)
+                self.assertIn(expected, output)
+
+    def test_an_unknown_state_names_the_four_states(self) -> None:
+        # The kept predecessor 01 and the task 03 of this run each get one report.
         files = valid_files()
-        replace("03-list-by-tag.md", "state: pending", "state: done")(files)
+        replace("01-add-entries.md", "state: pending", "state: blocked")(files)
+        replace("03-list-by-tag.md", "state: pending", "state: blocked")(files)
         self.write(files)
         code, output = self.run_validator("--files", "03-list-by-tag.md")
         self.assertEqual(code, 1, output)
-        self.assertIn(
-            "03-list-by-tag.md:4: a task written in this run has `state: pending`", output
-        )
+        message = "`state` must be `pending`, `running`, `failed`, or `done`"
+        self.assertIn(f"01-add-entries.md:3: {message}", output)
+        self.assertIn(f"03-list-by-tag.md:4: {message}", output)
+        self.assertIn("failed: 2 problem(s)", output)
 
-    def test_a_kept_task_may_be_done(self) -> None:
-        files = valid_files()
-        replace("01-add-entries.md", "state: pending", "state: done")(files)
-        self.write(files)
-        code, output = self.run_validator("--files", "02-tag-entries.md", "03-list-by-tag.md")
-        self.assertEqual(code, 0, output)
+    def test_a_kept_predecessor_may_be_past_pending(self) -> None:
+        # 01 is a direct predecessor of 02 and an indirect predecessor of 03.
+        for label, frontmatter in (
+            ("done", "state: done\n"),
+            ("running", "state: running\n"),
+            (
+                "failed with one gap",
+                'state: failed\nfailure:\n  - "Acceptance 2: no test covers an empty tag list"\n',
+            ),
+            (
+                "failed with an escaped quote and backslash",
+                'state: failed\nfailure:\n  - "Acceptance 3: `\\"a\\\\b\\"` is not parsed"\n',
+            ),
+            (
+                "failed with two gaps",
+                (
+                    'state: failed\nfailure:\n  - "Acceptance 1: no test"\n'
+                    '  - "Acceptance 2: no test"\n'
+                ),
+            ),
+        ):
+            for selection in (("02-tag-entries.md", "03-list-by-tag.md"), ("03-list-by-tag.md",)):
+                with self.subTest(label, selection=selection):
+                    files = valid_files()
+                    replace("01-add-entries.md", "state: pending\n", frontmatter)(files)
+                    self.write(files)
+                    code, output = self.run_validator("--files", *selection)
+                    self.assertEqual(code, 0, output)
+
+    def test_a_kept_predecessor_with_a_bad_failure_list_is_reported(self) -> None:
+        empty = "01-add-entries.md:4: `failure` lists at least one verifier gap"
+        block = "01-add-entries.md:4: write `failure` as a block list, one gap per line"
+        item = "01-add-entries.md:5: each `failure` item is `- ` and one double-quoted string"
+        not_failed = "01-add-entries.md:4: only a task with `state: failed` has a `failure` list"
+        failed = "state: failed\nfailure:"
+        for label, frontmatter, expected in (
+            (
+                "no failure key",
+                "state: failed\n",
+                (
+                    "01-add-entries.md:3: a task with `state: failed` lists its verifier gaps "
+                    "under `failure`"
+                ),
+            ),
+            ("empty flow list", failed + " []\n", empty),
+            ("no items", failed + "\n", empty),
+            ("flow list", failed + ' ["Acceptance 2: no test"]\n', block),
+            ("inline string", failed + ' "Acceptance 2: no test"\n', block),
+            ("unquoted item", failed + "\n  - Acceptance 2: no test\n", item),
+            ("single-quoted item", failed + "\n  - 'Acceptance 2: no test'\n", item),
+            ("item indented four spaces", failed + '\n    - "Acceptance 2: no test"\n', item),
+            ("item indented with a tab", failed + '\n\t- "Acceptance 2: no test"\n', item),
+            ("unescaped quote", failed + '\n  - "Acceptance 2: "tag" is empty"\n', item),
+            ("unknown escape", failed + '\n  - "Acceptance 2: no test\\n"\n', item),
+            ("escaped closing quote", failed + '\n  - "Acceptance 2: no test\\"\n', item),
+            ("text after the string", failed + '\n  - "Acceptance 2: no test" # gap\n', item),
+            ("empty string", failed + '\n  - ""\n', item),
+            ("blank string", failed + '\n  - "  "\n', item),
+            (
+                "second item malformed",
+                failed + '\n  - "Acceptance 1: no test"\n  - Acceptance 2\n',
+                item.replace(":5:", ":6:"),
+            ),
+            *(
+                (
+                    f"{state} with a failure list",
+                    f'state: {state}\nfailure:\n  - "Acceptance 2: no test"\n',
+                    not_failed,
+                )
+                for state in ("done", "running", "pending")
+            ),
+        ):
+            with self.subTest(label):
+                files = valid_files()
+                replace("01-add-entries.md", "state: pending\n", frontmatter)(files)
+                self.write(files)
+                code, output = self.run_validator("--files", "03-list-by-tag.md")
+                self.assertEqual(code, 1, output)
+                self.assertIn(expected, output)
 
     def test_a_kept_task_that_is_not_utf8_is_ignored(self) -> None:
         self.write(valid_files())
