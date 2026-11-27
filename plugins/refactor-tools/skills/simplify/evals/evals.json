@@ -3,35 +3,232 @@
   "evals": [
     {
       "id": 1,
-      "prompt": "Simplify the staged changes in src/api/user-service.ts. I only touched the fetchUserProfile function and one small parsing branch. Clean that area up for readability and duplication, but leave the rest of the file alone unless you need a tiny helper or import adjustment to keep the refactor coherent.",
-      "expected_output": "The cleanup stays within the changed function or directly adjacent code needed for correctness, and unrelated functions in the file are left unchanged or only mentioned in the report.",
-      "files": [],
+      "prompt": "/refactor-tools:simplify focus on fetch_user_profile and its new nickname branch, and leave the rest of shop/user_service.py alone",
+      "expected_output": "The cleanup stays inside fetch_user_profile, reuses the helpers already defined in the file, and leaves the other functions unchanged.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/shop/user_service.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/tests/test_user_service.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/user-profile/staged/shop/user_service.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/user-profile/staged/tests/test_user_service.py"
+      ],
       "expectations": [
-        "The final diff restores the shared readString helper for first_name, last_name, or birthday parsing inside fetchUserProfile.",
-        "The final diff restores the shared formatDisplayName helper instead of keeping inline display-name branching inside fetchUserProfile.",
-        "The final diff does not modify listUserEmails or describeUser."
+        "fetch_user_profile calls read_string for first_name, last_name, and birthday.",
+        "fetch_user_profile calls format_display_name instead of branching inline on first and last.",
+        "list_user_emails and describe_user match the staged version byte for byte.",
+        "`python3 -m unittest` passes after the run."
       ]
     },
     {
       "id": 2,
-      "prompt": "Please refactor the latest commit in src/cache/store.ts. I changed two methods in the cache adapter. Improve the touched methods, but do not sweep the whole file for style issues unless a shared helper that those methods already use should be tightened up too.",
-      "expected_output": "The skill maps the changed hunks to the touched methods, applies safe simplifications there, and avoids unrelated whole-file cleanup.",
-      "files": [],
+      "prompt": "/refactor-tools:simplify improve the two cache methods from the latest commit without sweeping the rest of the file",
+      "expected_output": "The skill reviews the latest commit, simplifies get_many and set_many, and keeps the treatment of stored None values.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/shop/cache_store.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/tests/test_cache_store.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/cache-store/commit/shop/cache_store.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/cache-store/commit/tests/test_cache_store.py"
+      ],
       "expectations": [
-        "The final diff simplifies getMany without modifying get or clear.",
-        "The final diff removes repeated Date.now() checks or duplicate expiry handling inside getMany.",
-        "The final diff simplifies setMany by reusing the existing set path or a single shared expiry computation."
+        "The report's `Source` line names the last commit.",
+        "get_many either reads the clock at most once per key, or keeps both reads and reports the double read under LEFT UNCHANGED as a behavior change.",
+        "set_many computes the expiry once or reuses set.",
+        "get and clear match HEAD byte for byte.",
+        "`python3 -m unittest` passes after the run, including test_get_many_keeps_stored_none."
       ]
     },
     {
       "id": 3,
-      "prompt": "Clean up the staged diff in src/components/Table.tsx and src/components/Table.test.tsx. Focus on the render branch and the matching updated test case. If you notice other questionable code elsewhere in those files, report it but keep the edits scoped to the changed parts unless I explicitly ask for a broader pass.",
-      "expected_output": "Edits stay anchored to the changed render logic and matching test updates, with unrelated opportunities reported instead of rewritten.",
-      "files": [],
+      "prompt": "/refactor-tools:simplify focus on the render branch and its test; report other questionable code in those files without editing it",
+      "expected_output": "The status branches share one table shell, the changed test case loses its duplicated setup, and render_cell and render_body stay as they were.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/shop/table.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/tests/test_table.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/table-status/staged/shop/table.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/table-status/staged/tests/test_table.py"
+      ],
       "expectations": [
-        "The final diff removes the duplicated table-shell wrapper logic from the loading and empty-state branches.",
-        "The final diff updates Table.test.tsx to match the chosen render cleanup.",
-        "The final diff does not modify renderCell or the table body rendering path."
+        "render_table builds the table shell for the loading and empty states in one place.",
+        "The status tests call render_header at most once each and still assert both status outputs.",
+        "render_cell, render_header, and render_body match the staged version byte for byte.",
+        "`python3 -m unittest` passes after the run.",
+        "Every APPLIED FIXES entry states the cost the fix removes and ends with the passes that reported it.",
+        "Every LEFT UNCHANGED entry ends with the passes that reported it, or `passes: none`.",
+        "The report's `Passes` line matches the run's transcript: it says subagents only when the transcript shows subagent launches, and inline otherwise."
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "/refactor-tools:simplify",
+      "expected_output": "Without any hint in the code, the altitude pass traces the zero special case to format_currency keeping the sign of a rounded negative zero, names that fix, and leaves it unapplied because it lies outside the edit region and affects other callers.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/shop/invoice.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/shop/util/money.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/tests/test_invoice.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/invoice-zero/staged/shop/invoice.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/invoice-zero/staged/tests/test_invoice.py"
+      ],
+      "expectations": [
+        "The report lists an Altitude finding about the early return in format_invoice_total.",
+        "The Altitude finding names normalizing negative zero inside format_currency as the deeper fix.",
+        "The Altitude finding appears under LEFT UNCHANGED with a scope, risk, or confidence reason.",
+        "shop/util/money.py matches HEAD byte for byte.",
+        "After the run, `format_invoice_total([{\"amount\": Decimal(\"-0.004\")}])` returns `\"$0.00\"`."
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "/refactor-tools:simplify",
+      "expected_output": "With nothing staged, the skill reviews the unstaged change to count_by_status and ignores the function the last commit added.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/shop/report.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/tests/test_report.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/report-unstaged/commit/shop/report.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/report-unstaged/commit/tests/test_report.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/report-unstaged/unstaged/shop/report.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/report-unstaged/unstaged/tests/test_report.py"
+      ],
+      "expectations": [
+        "The report's `Source` line names unstaged changes.",
+        "count_by_status no longer branches on `status in counts`.",
+        "count_by_status still returns a plain dict, so looking up a missing status raises KeyError.",
+        "average_quantity matches HEAD byte for byte.",
+        "`git diff --cached` is empty after the run.",
+        "`python3 -m unittest` passes after the run.",
+        "The report's REVERSAL section names a before and an after snapshot and gives a command that undoes only the skill's edits.",
+        "Running that command makes `git diff` match its output before the run, so the unstaged count_by_status change survives."
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "/refactor-tools:simplify",
+      "expected_output": "The reuse pass finds squash in shop/util/tokens.py, recognizes that it matches the regular expression in add_note, and add_note calls it.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/shop/notes.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/shop/util/tokens.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/shop/catalog.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/note-reuse/staged/shop/notes.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/note-reuse/staged/tests/test_notes.py"
+      ],
+      "expectations": [
+        "shop/notes.py imports squash from shop.util.tokens.",
+        "add_note no longer calls re.sub for the body or the tags.",
+        "shop/util/tokens.py matches HEAD byte for byte.",
+        "`python3 -m unittest` passes after the run."
+      ]
+    },
+    {
+      "id": 7,
+      "prompt": "/refactor-tools:simplify",
+      "expected_output": "product_slugs reuses product_slug, and verification rejects replacing product_slug's lower() with slugify, which uses casefold() and changes results for characters such as ß.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/shop/catalog.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/shop/util/text.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/tests/test_text.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/product-slug/staged/shop/catalog.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/product-slug/staged/tests/test_catalog.py"
+      ],
+      "expectations": [
+        "product_slugs calls product_slug instead of repeating the join, lower, and split expression.",
+        "After the run, `product_slug(\"Straße Bolt\")` returns `\"straße-bolt\"`.",
+        "Any finding that suggests slugify for product slugs appears under LEFT UNCHANGED.",
+        "`python3 -m unittest` passes after the run."
+      ]
+    },
+    {
+      "id": 8,
+      "prompt": "/refactor-tools:simplify",
+      "expected_output": "With a clean working tree on a feature branch, the skill reviews both branch commits since main, so it simplifies bulk_discount from the first commit as well as discounted_totals from the last one.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/branch-discounts/branch",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/branch-discounts/commit-1/shop/discounts.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/branch-discounts/commit-1/tests/test_discounts.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/branch-discounts/commit-2/shop/discounts.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/branch-discounts/commit-2/tests/test_discounts.py"
+      ],
+      "expectations": [
+        "The report's `Source` line names the branch commits and their merge base with main.",
+        "bulk_discount no longer nests an if statement inside an else block.",
+        "discounted_totals multiplies price by quantity at most once per line.",
+        "Every file outside shop/discounts.py and tests/test_discounts.py matches HEAD byte for byte.",
+        "`python3 -m unittest` passes after the run."
+      ]
+    },
+    {
+      "id": 9,
+      "prompt": "/refactor-tools:simplify",
+      "expected_output": "The only test covers the all-paid case, so a deliberate break in a medium-confidence fix to first_overdue or overdue_total leaves it passing. The skill keeps such a fix only with a negative control that made a test fail, and both functions keep their exact behavior, including which invoice wins a tie.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/check-overdue.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/overdue-weak-test/staged/shop/overdue.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/overdue-weak-test/staged/tests/test_overdue.py"
+      ],
+      "expectations": [
+        "Every medium-confidence fix in APPLIED FIXES has a negative control in VALIDATION that names the deliberate break and the test that failed.",
+        "`python3 -I check-overdue.py <workspace>/repo` reports 0 behavior mismatches after the run.",
+        "No deliberate break remains in shop/overdue.py or tests/test_overdue.py.",
+        "`python3 -m unittest` passes after the run."
+      ]
+    },
+    {
+      "id": 10,
+      "prompt": "/refactor-tools:simplify",
+      "expected_output": "The skill finds the Makefile's check target and runs its custom tools/check_money.py check as well as the unit tests, then flattens the nested branches in shipping_fee.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/shop-repo/README.md",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/shipping-project-check/commit/Makefile",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/shipping-project-check/commit/tools/check_money.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/shipping-project-check/staged/shop/shipping.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/shipping-project-check/staged/tests/test_shipping.py"
+      ],
+      "expectations": [
+        "VALIDATION lists `make check` or `python3 tools/check_money.py` and names the Makefile as its source.",
+        "`python3 tools/check_money.py` passes after the run.",
+        "shipping_fee no longer has an else block after a return.",
+        "`python3 -m unittest` passes after the run."
+      ]
+    },
+    {
+      "id": 11,
+      "prompt": "/refactor-tools:simplify",
+      "expected_output": "Each rule finding quotes the AGENTS.md rule and the line that breaks it. The skill renames the local restockable variable under the is_ or has_ rule, keeps the public damaged parameter, and never treats 'Keep code easy to read.' as a broken rule.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/returns-rules/commit/AGENTS.md",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/returns-rules/staged/shop/returns.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/returns-rules/staged/tests/test_returns.py"
+      ],
+      "expectations": [
+        "Every finding that cites a project rule quotes the rule text, names AGENTS.md, and quotes or cites the line that breaks it.",
+        "The report has a finding about `restockable` or `damaged` that quotes the `is_` or `has_` naming rule.",
+        "refund_amount keeps the `damaged` parameter name.",
+        "No finding cites `Keep code easy to read.` as the rule that a line breaks.",
+        "`python3 -m unittest` passes after the run."
+      ]
+    },
+    {
+      "id": 12,
+      "prompt": "/refactor-tools:simplify",
+      "expected_output": "The efficiency pass flags the git subprocess that shop/version.py runs on every import and names a lazy alternative. Because moving it changes when the subprocess runs and could remove the public BUILD constant, the skill applies it only if BUILD stays available, or reports it unapplied.",
+      "files": [
+        "plugins/refactor-tools/skills/simplify/evals/inputs/setup-simplify-eval.sh",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/version-startup/staged/shop/version.py",
+        "plugins/refactor-tools/skills/simplify/evals/inputs/changes/version-startup/staged/tests/test_version.py"
+      ],
+      "expectations": [
+        "The report has an Efficiency finding about the `git rev-parse` subprocess that runs when shop.version is imported.",
+        "That finding names a lazy alternative, such as computing the build on first use.",
+        "After the run, `from shop.version import BUILD` still works, or the finding appears under LEFT UNCHANGED.",
+        "`python3 -m unittest` passes after the run."
       ]
     }
   ]

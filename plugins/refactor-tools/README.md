@@ -4,7 +4,7 @@ Refactor Tools simplifies existing code while preserving behavior and reviews co
 
 ## How it works
 
-![Refactor Tools skills process staged changes, commits, or paths: simplify makes safe unstaged edits, and review-changes scores changes in six dimensions without editing files.](./assets/skills.svg)
+![Refactor Tools skills process uncommitted changes, commits, or paths: simplify makes safe unstaged edits, and review-changes scores changes in six dimensions without editing files.](./assets/skills.svg)
 
 Each skill runs only when you invoke it directly.
 
@@ -12,13 +12,15 @@ Each skill runs only when you invoke it directly.
 
 `simplify` applies safe simplifications to changed code.
 
-- It targets named files, directories, commits, or ranges.
+- It targets named files, directories, commits, or ranges, and otherwise staged changes, unstaged changes, the current branch's commits, or the last commit, in that order.
 - It limits edits to the function, test, or block around each changed hunk unless you request a pass over the whole file.
-- It runs three review passes for code reuse, code quality, and efficiency.
-- It applies safe findings with high confidence, or with medium confidence and targeted test coverage.
+- It runs four review passes for code reuse, code quality, efficiency, and altitude, which checks that each change fixes the root cause instead of a symptom.
+- The reuse pass searches shared modules and nearby files for existing helpers that new code re-implements.
+- It checks each finding against the current code before applying it.
+- It applies safe findings with high confidence, or with medium confidence when a deliberate break in the fix makes a targeted test fail.
 - It reports findings rated as low confidence, caution, or risky without applying them.
-- It keeps its edits unstaged and preserves existing changes.
-- It runs the narrowest relevant tests, type checks, and linters.
+- It keeps its edits unstaged, preserves existing changes, and reports a command that undoes only its own edits.
+- It finds validation commands in project rules, task runners, CI workflows, and READMEs, then runs the narrowest relevant tests, type checks, linters, and custom checks.
 
 ### review-changes
 
