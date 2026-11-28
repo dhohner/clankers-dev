@@ -13,13 +13,13 @@
     "check": "pnpm run lint && pnpm run format:check && pnpm test && pnpm run typecheck"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "1.5.2",
-    "@earendil-works/pi-tui": "1.5.2",
+    "@earendil-works/pi-coding-agent": "1.6.0",
+    "@earendil-works/pi-tui": "1.6.0",
     "@types/node": "^26.6.6",
-    "oxfmt": "^0.78.0",
-    "oxlint": "1.93.0",
+    "oxfmt": "^0.79.0",
+    "oxlint": "1.94.0",
     "typescript": "^7.0.2",
-    "vitest": "^5.0.5"
+    "vitest": "^5.1.1"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
